@@ -1,0 +1,58 @@
+# Python virtual environment
+venv/
+.venv/
+env/
+.env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.pyc
+
+# Environment variables (IMPORTANT: nu face push la credentiale!)
+.env
+.env.*
+!.env.example
+venv
+
+# Alembic — păstrăm migrările, ignorăm doar cache-ul
+alembic/__pycache__/
+
+# Teste & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (dacă adaugi frontend mai târziu)
+node_modules/
+dist/
+build/
+.next/
+
+# Logs
+*.log
+logs/
+
+# Database locale (SQLite dev)
+*.db
+*.sqlite3
+
+
+# Local/exported project snapshots
+COMPLETE_PROJECT_CODE.md
+
+*Zone.Identifier
