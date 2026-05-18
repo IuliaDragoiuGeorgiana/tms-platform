@@ -4,6 +4,7 @@ from jose import jwt, JWTError
 from app.core.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 import secrets
 import string
+import hashlib
 
 
 def hash_password(password: str) -> str:
@@ -34,3 +35,27 @@ def generate_temporary_password(length: int = 12) -> str:
     """
     alphabet = string.ascii_letters + string.digits + "!@#$%"
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
+def generate_reset_token() -> str:
+    """
+    Generează un token random pentru resetarea parolei.
+    Tokenul real se trimite pe email, iar în DB se salvează doar hash-ul.
+    """
+    return secrets.token_urlsafe(32)
+
+
+def hash_reset_token(token: str) -> str:
+    """
+    Hash-uiește tokenul de resetare folosind SHA-256.
+
+    Tokenul este generat random, cu entropie mare, deci SHA-256 este potrivit
+    pentru lookup rapid în baza de date. Pentru parole se folosește în continuare bcrypt.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_reset_token_expiry() -> datetime:
+    """
+    Tokenul de resetare expiră după 15 minute.
+    """
+    return datetime.now(timezone.utc) + timedelta(minutes=15)

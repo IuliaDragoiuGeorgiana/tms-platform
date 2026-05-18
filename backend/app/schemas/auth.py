@@ -1,6 +1,5 @@
 import uuid
-from pydantic import BaseModel, EmailStr, Field
-
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 class RegisterRequest(BaseModel):
     """Self-registration — doar pentru CLIENT."""
@@ -47,3 +46,20 @@ class InviteUserRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=8)
+
+class ForgotPasswordRequest(BaseModel):
+    """Request pentru inițierea resetării parolei."""
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request pentru setarea unei parole noi folosind tokenul primit pe email."""
+    token: str
+    new_password: str = Field(min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("Parola trebuie să aibă minim 8 caractere")
+        return value

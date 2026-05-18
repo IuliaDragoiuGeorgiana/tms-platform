@@ -43,5 +43,11 @@ class User(UUIDPrimaryKey, FullTimestampMixin, Base):
     driver_profile = relationship("Driver", back_populates="user", uselist=False)
     invited_by = relationship("User", remote_side="User.id", foreign_keys=[invited_by_id])
 
+    password_reset_tokens = relationship(
+    "PasswordResetToken",
+    back_populates="user",
+    cascade="all, delete-orphan",
+    )
+
     def __repr__(self) -> str:
         return f"<User {self.email} ({self.role.value})>"

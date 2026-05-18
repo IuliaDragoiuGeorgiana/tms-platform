@@ -14,6 +14,7 @@ from app.models.notification import Notification
 from app.models.chat_message import ChatMessage
 from app.models.system_config import SystemConfig
 from app.models.daily_report import DailyReport
+from app.models.password_reset_token import PasswordResetToken
 
 __all__ = [
     "Base",
@@ -21,4 +22,5 @@ __all__ = [
     "Order", "PlanningSession", "Trip", "TripStop",
     "Incident", "TripCost", "AuditLog", "Notification",
     "ChatMessage", "SystemConfig", "DailyReport",
+    "PasswordResetToken",
 ]

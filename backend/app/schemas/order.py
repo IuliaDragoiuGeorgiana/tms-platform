@@ -1,7 +1,6 @@
 import uuid
 from datetime import date, time, datetime
-from pydantic import BaseModel
-
+from pydantic import BaseModel, field_validator, model_validator
 
 class CreateOrderRequest(BaseModel):
     """
@@ -30,6 +29,34 @@ class CreateOrderRequest(BaseModel):
 
     # Extra
     special_instructions: str | None = None
+
+    @field_validator("kg", "m3")
+    @classmethod
+    def positive_values(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("Greutatea și volumul trebuie să fie valori pozitive")
+        return value
+
+    @model_validator(mode="after")
+    def validate_dates_and_time_windows(self):
+        if self.earliest_delivery_date and self.earliest_delivery_date > self.delivery_deadline:
+            raise ValueError("earliest_delivery_date nu poate fi după delivery_deadline")
+
+        if (
+            self.pickup_time_window_start
+            and self.pickup_time_window_end
+            and self.pickup_time_window_start >= self.pickup_time_window_end
+        ):
+            raise ValueError("Fereastra orară de pickup este invalidă")
+
+        if (
+            self.delivery_time_window_start
+            and self.delivery_time_window_end
+            and self.delivery_time_window_start >= self.delivery_time_window_end
+        ):
+            raise ValueError("Fereastra orară de delivery este invalidă")
+
+        return self
 
 
 class OrderResponse(BaseModel):

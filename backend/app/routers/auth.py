@@ -1,18 +1,32 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from fastapi import Request
+from datetime import datetime, timezone
 
 from app.database import get_db
 from app.models.company import Company
 from app.models.user import User, RoleEnum
+from app.models.password_reset_token import PasswordResetToken
 from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
     UserResponse,
     ChangePasswordRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest
+
 )
-from app.core.security import hash_password, verify_password, create_access_token
+from app.core.security import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    generate_reset_token,
+    hash_reset_token,
+    create_reset_token_expiry,
+)
 from app.dependencies import get_current_user
+from app.services.email_service import send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -102,13 +116,29 @@ def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Contul așteaptă aprobare de la administrator",
         )
+    
+    user_role = user.role.value if hasattr(user.role, "value") else str(user.role)
+
+    if user_role != "SUPER_ADMIN":
+        if not user.company_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Utilizatorul nu este asociat unei companii",
+            )
+
+        company = db.query(Company).filter(Company.id == user.company_id).first()
+
+        if not company or not company.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Compania ta a fost dezactivată. Contactează administratorul platformei.",
+            )
 
     token = create_access_token({
         "sub": str(user.id),
-        "role": user.role.value if hasattr(user.role, "value") else str(user.role),
+        "role": user_role,
         "company_id": str(user.company_id) if user.company_id else None,
     })
-
     return TokenResponse(
         access_token=token,
         must_change_password=user.must_change_password,
@@ -142,6 +172,110 @@ def change_password(
     db.commit()
 
     return {"message": "Parolă schimbată cu succes"}
+
+
+@router.post("/forgot-password", response_model=dict)
+def forgot_password(
+    data: ForgotPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Inițiază resetarea parolei.
+
+    Răspunsul este generic pentru a nu dezvălui dacă emailul există în sistem.
+    Dacă userul există și este activ, sistemul generează un token temporar,
+    salvează doar hash-ul în DB și trimite tokenul real pe email.
+    """
+    user = db.query(User).filter(User.email == data.email).first()
+
+    if user and user.is_active:
+        # Invalidăm tokenurile vechi nefolosite ale userului.
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        ).delete()
+
+        reset_token = generate_reset_token()
+
+        token_record = PasswordResetToken(
+            user_id=user.id,
+            token_hash=hash_reset_token(reset_token),
+            expires_at=create_reset_token_expiry(),
+            ip_address=request.client.host if request.client else None,
+            user_agent=(request.headers.get("user-agent") or "")[:255],
+        )
+
+        db.add(token_record)
+        db.commit()
+
+        send_password_reset_email(
+            to_email=user.email,
+            to_name=user.full_name or user.email,
+            reset_token=reset_token,
+        )
+
+    return {
+        "message": "Dacă adresa de email există în sistem, vei primi un link de resetare parolă în câteva momente."
+    }
+
+@router.post("/reset-password", response_model=dict)
+def reset_password(
+    data: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Setează o parolă nouă folosind tokenul primit pe email.
+
+    Tokenul este de unică folosință. După resetare, este marcat ca folosit,
+    iar celelalte tokenuri active ale userului sunt invalidate.
+    """
+    token_hash = hash_reset_token(data.token)
+
+    token_record = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash,
+        PasswordResetToken.used_at.is_(None),
+    ).first()
+
+    if not token_record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token invalid sau deja folosit",
+        )
+
+    if token_record.is_expired():
+        db.delete(token_record)
+        db.commit()
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tokenul a expirat. Solicită un nou link de resetare.",
+        )
+
+    user = db.query(User).filter(User.id == token_record.user_id).first()
+
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token invalid sau utilizator inactiv",
+        )
+
+    user.password_hash = hash_password(data.new_password)
+    user.must_change_password = False
+
+    token_record.used_at = datetime.now(timezone.utc)
+
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used_at.is_(None),
+        PasswordResetToken.id != token_record.id,
+    ).delete()
+
+    db.commit()
+
+    return {
+        "message": "Parola a fost schimbată cu succes. Te poți autentifica acum cu noua parolă."
+    }
 
 
 @router.get("/me", response_model=UserResponse)

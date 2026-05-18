@@ -1,29 +1,54 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel
-
+from pydantic import BaseModel, field_validator
 
 class CreateCompanyRequest(BaseModel):
     """Ce trimite SUPER_ADMIN când creează o companie nouă."""
-    name: str                          # Numele companiei (ex: "Transport Rapid SRL")
-    slug: str                          # URL-friendly (ex: "transport-rapid")
-    plan: str = "FREE"                 # Planul de abonament: FREE / BASIC / PRO
-    max_vehicles: int = 10             # Câte vehicule poate avea
-    max_users: int = 20                # Câți utilizatori poate avea
+    name: str
+    slug: str
+    plan: str = "FREE"
+    max_vehicles: int = 10
+    max_users: int = 20
+
+    @field_validator("slug")
+    @classmethod
+    def slug_alphanumeric(cls, value: str) -> str:
+        if not value.replace("-", "").replace("_", "").isalnum():
+            raise ValueError("Slug-ul poate conține doar litere, cifre, - și _")
+        return value.lower()
+
+class UpdateCompanyRequest(BaseModel):
+    """Ce trimite SUPER_ADMIN când actualizează o companie."""
+    name: str | None = None
+    is_active: bool | None = None
+    plan: str | None = None
+    max_vehicles: int | None = None
+    max_users: int | None = None
 
 
 class CompanyResponse(BaseModel):
-    """Ce returnează API-ul când arată datele unei companii."""
     id: uuid.UUID
     name: str
     slug: str
     is_active: bool
     plan: str
-    max_vehicles: int
-    max_users: int
+    max_vehicles: int | None
+    max_users: int | None
     created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
-    # from_attributes = True permite Pydantic să citească direct din obiectul
-    # SQLAlchemy (care are atribute, nu dicționar). Fără asta, ar da eroare
-    # când încerci să returnezi un obiect Company din DB.
+
+
+class CompanyStatsResponse(BaseModel):
+    """Statistici pentru o companie specifică."""
+    company_id: uuid.UUID
+    company_name: str
+    is_active: bool
+    total_users: int
+    total_vehicles: int
+    total_orders: int
+    total_trips: int
+    plan: str
+    max_vehicles: int | None
+    max_users: int | None

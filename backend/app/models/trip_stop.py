@@ -51,7 +51,6 @@ class TripStop(UUIDPrimaryKey, Base):
 
     # Relationships
     trip = relationship("Trip", back_populates="stops")
-    order = relationship("Order", back_populates="trip_stop")
-
+    order = relationship("Order", back_populates="trip_stops")
     def __repr__(self) -> str:
         return f"<TripStop #{self.sequence} ({self.status.value})>"

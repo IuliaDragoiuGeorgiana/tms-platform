@@ -88,7 +88,11 @@ class Order(UUIDPrimaryKey, FullTimestampMixin, Base):
     # Relationships
     company = relationship("Company", back_populates="orders")
     client = relationship("User", foreign_keys=[client_id])
-    trip_stop = relationship("TripStop", back_populates="order", uselist=False)
+    trip_stops = relationship(
+    "TripStop",
+    back_populates="order",
+    cascade="all, delete-orphan",
+)
 
     def __repr__(self) -> str:
         return f"<Order {self.order_ref} ({self.status.value})>"
