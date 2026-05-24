@@ -30,6 +30,8 @@ class CreateOrderRequest(BaseModel):
     # Extra
     special_instructions: str | None = None
 
+    client_id: uuid.UUID | None = None
+
     @field_validator("kg", "m3")
     @classmethod
     def positive_values(cls, value: float) -> float:
@@ -37,8 +39,33 @@ class CreateOrderRequest(BaseModel):
             raise ValueError("Greutatea și volumul trebuie să fie valori pozitive")
         return value
 
+    @field_validator("type_marfa")
+    @classmethod
+    def valid_type_marfa(cls, value: str) -> str:
+        allowed = {"STANDARD", "FRAGIL", "PERISABIL", "ADR"}
+        value = value.upper()
+
+        if value not in allowed:
+            raise ValueError("type_marfa trebuie să fie: STANDARD, FRAGIL, PERISABIL sau ADR")
+
+        return value
+
+    @field_validator("priority")
+    @classmethod
+    def valid_priority(cls, value: str) -> str:
+        allowed = {"NORMAL", "URGENT", "CRITIC"}
+        value = value.upper()
+
+        if value not in allowed:
+            raise ValueError("priority trebuie să fie: NORMAL, URGENT sau CRITIC")
+
+        return value
+
     @model_validator(mode="after")
     def validate_dates_and_time_windows(self):
+        if self.delivery_deadline < date.today():
+            raise ValueError("delivery_deadline nu poate fi în trecut")
+
         if self.earliest_delivery_date and self.earliest_delivery_date > self.delivery_deadline:
             raise ValueError("earliest_delivery_date nu poate fi după delivery_deadline")
 
@@ -58,6 +85,10 @@ class CreateOrderRequest(BaseModel):
 
         return self
 
+
+class MarkOrderProblematicRequest(BaseModel):
+    """Motivul pentru care o comandă este marcată ca problematică."""
+    problem_reason: str
 
 class OrderResponse(BaseModel):
     id: uuid.UUID
@@ -98,5 +129,8 @@ class OrderResponse(BaseModel):
     attempts_count: int
     special_instructions: str | None
     created_at: datetime
+
+    is_problematic: bool
+    problem_reason: str | None
 
     model_config = {"from_attributes": True}

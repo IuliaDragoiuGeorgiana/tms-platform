@@ -273,3 +273,26 @@ def deactivate_user(
     db.refresh(user)
 
     return user
+
+@router.get("/clients", response_model=list[UserResponse])
+def list_company_clients(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("MANAGER", "DISPECER")),
+):
+    """
+    Listează clienții activi și aprobați din compania curentă.
+    Util pentru Dispecer/Manager când creează o comandă în numele unui client.
+    """
+    clients = (
+        db.query(User)
+        .filter(
+            User.company_id == current_user.company_id,
+            User.role == RoleEnum.CLIENT,
+            User.is_active == True,
+            User.is_approved == True,
+        )
+        .order_by(User.full_name.asc())
+        .all()
+    )
+
+    return clients

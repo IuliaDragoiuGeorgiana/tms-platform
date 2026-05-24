@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import String, Integer, Enum, ForeignKey, Date, Time, Text, Numeric
+from sqlalchemy import String, Integer, Enum, ForeignKey, Date, Time, Text, Numeric, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, UUIDPrimaryKey, FullTimestampMixin
@@ -84,6 +84,16 @@ class Order(UUIDPrimaryKey, FullTimestampMixin, Base):
     )
     attempts_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     special_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    special_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    is_problematic: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
+    problem_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
     company = relationship("Company", back_populates="orders")

@@ -42,9 +42,10 @@ def run_planning(
     # PAS 1: Ia comenzile eligibile
     # ==========================================
     orders = db.query(Order).filter(
-        Order.company_id == company_id,
-        Order.status == OrderStatusEnum.PENDING,
-        Order.delivery_deadline >= planned_date,
+    Order.company_id == company_id,
+    Order.status == OrderStatusEnum.PENDING,
+    Order.is_problematic.is_(False),
+    Order.delivery_deadline >= planned_date,
     ).all()
 
     if not orders:
