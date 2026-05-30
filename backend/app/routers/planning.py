@@ -29,6 +29,11 @@ def generate_plan(
     
     Doar DISPECER și MANAGER pot genera planuri.
     """
+    if planned_date < date.today():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nu poți genera un plan pentru o dată din trecut",
+        )
     result = run_planning(
         db=db,
         company_id=current_user.company_id,

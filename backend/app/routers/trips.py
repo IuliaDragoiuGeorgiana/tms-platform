@@ -214,7 +214,6 @@ def arrive_at_stop(
 
     return stop
 
-
 @router.patch("/{trip_id}/stops/{stop_id}/complete", response_model=TripStopResponse)
 def complete_stop(
     trip_id: uuid.UUID,
@@ -229,7 +228,11 @@ def complete_stop(
     DELIVERY: marfa a fost livrată cu succes.
     """
     from app.models.driver import Driver
+
     driver = db.query(Driver).filter(Driver.user_id == current_user.id).first()
+
+    if not driver:
+        raise HTTPException(status_code=404, detail="Nu ai profil de șofer")
 
     trip = db.query(Trip).filter(
         Trip.id == trip_id,
@@ -248,16 +251,19 @@ def complete_stop(
         raise HTTPException(status_code=404, detail="Stopul nu a fost găsit")
 
     if stop.status != StopStatusEnum.PENDING:
-        raise HTTPException(status_code=400, detail=f"Stopul are deja statusul {stop.status.value}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stopul are deja statusul {stop.status.value}",
+        )
 
-    stop.status = StopStatusEnum.DELIVERED
+    stop.status = StopStatusEnum.COMPLETED
     stop.departure_time = datetime.now(timezone.utc)
     stop.notes = data.notes
 
     if not stop.arrival_time:
         stop.arrival_time = datetime.now(timezone.utc)
 
-    # Dacă e DELIVERY și a fost livrat cu succes, marcăm comanda DELIVERED
+    # Doar la DELIVERY marcăm întreaga comandă ca livrată.
     if stop.stop_type == StopTypeEnum.DELIVERY:
         stop.order.status = OrderStatusEnum.DELIVERED
 
@@ -265,7 +271,6 @@ def complete_stop(
     db.refresh(stop)
 
     return stop
-
 
 @router.patch("/{trip_id}/stops/{stop_id}/fail", response_model=TripStopResponse)
 def fail_stop(
@@ -305,7 +310,14 @@ def fail_stop(
         raise HTTPException(status_code=400, detail=f"Stopul are deja statusul {stop.status.value}")
 
     stop.status = StopStatusEnum.FAILED
-    stop.failure_reason = FailureReasonEnum(data.failure_reason)
+    try:
+        failure_reason = FailureReasonEnum(data.failure_reason)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="failure_reason invalid. Valori permise: ABSENT, REFUSED, WRONG_ADDRESS, DAMAGED, OTHER",
+        )
+    stop.failure_reason = failure_reason
     stop.notes = data.notes
     stop.departure_time = datetime.now(timezone.utc)
 

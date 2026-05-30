@@ -1,5 +1,5 @@
 import secrets
-from datetime import date, time
+from datetime import date, time, timedelta
 
 from app.database import SessionLocal
 from app.core.security import hash_password
@@ -144,6 +144,10 @@ def get_or_create_driver(db, company_id, user_id, vehicle_id):
     return driver
 
 
+today = date.today()
+earliest_date = today + timedelta(days=1)
+deadline_date = today + timedelta(days=3)
+
 def get_or_create_order(
     db,
     company_id,
@@ -190,7 +194,7 @@ def get_or_create_order(
         priority=priority,
 
         delivery_deadline=delivery_deadline,
-        earliest_delivery_date=date(2026, 5, 10),
+        earliest_delivery_date=earliest_date,
         flexibility_days=2,
 
         status=OrderStatusEnum.PENDING,
@@ -309,7 +313,7 @@ def seed_demo_data():
             m3=1.5,
             type_marfa=MarfaTypeEnum.STANDARD,
             priority=PriorityEnum.NORMAL,
-            delivery_deadline=date(2026, 7, 12),
+            delivery_deadline=deadline_date,
         )
 
         get_or_create_order(
@@ -327,7 +331,7 @@ def seed_demo_data():
             m3=2.0,
             type_marfa=MarfaTypeEnum.FRAGIL,
             priority=PriorityEnum.URGENT,
-            delivery_deadline=date(2026, 7, 12),
+            delivery_deadline=deadline_date,
         )
 
         get_or_create_order(
@@ -345,7 +349,7 @@ def seed_demo_data():
             m3=3.5,
             type_marfa=MarfaTypeEnum.PERISABIL,
             priority=PriorityEnum.CRITIC,
-            delivery_deadline=date(2026, 5, 12),
+            delivery_deadline=deadline_date,
         )
 
         print("\nSeed demo data finalizat cu succes.")

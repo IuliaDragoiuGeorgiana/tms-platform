@@ -11,7 +11,7 @@ class StopTypeEnum(str, enum.Enum):
 
 class StopStatusEnum(str, enum.Enum):
     PENDING = "PENDING"
-    DELIVERED = "DELIVERED"
+    COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     SKIPPED = "SKIPPED"
 
