@@ -32,6 +32,17 @@ class CreateOrderRequest(BaseModel):
 
     client_id: uuid.UUID | None = None
 
+    
+    @field_validator("address_pickup", "address_delivery")
+    @classmethod
+    def non_empty_address(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Adresele de pickup și delivery sunt obligatorii")
+
+        return value
+
     @field_validator("kg", "m3")
     @classmethod
     def positive_values(cls, value: float) -> float:
@@ -89,6 +100,12 @@ class CreateOrderRequest(BaseModel):
 class MarkOrderProblematicRequest(BaseModel):
     """Motivul pentru care o comandă este marcată ca problematică."""
     problem_reason: str
+
+
+class OrderFeasibilityResponse(BaseModel):
+    is_feasible: bool
+    warnings: list[str]
+
 
 class OrderResponse(BaseModel):
     id: uuid.UUID

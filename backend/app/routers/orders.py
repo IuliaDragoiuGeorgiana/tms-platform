@@ -11,6 +11,7 @@ from app.schemas.order import (
     CreateOrderRequest,
     OrderResponse,
     MarkOrderProblematicRequest,
+    OrderFeasibilityResponse,
 )
 from app.dependencies import require_roles, get_current_user
 
@@ -23,6 +24,105 @@ def generate_order_ref() -> str:
 
 def generate_tracking_token() -> str:
     return secrets.token_urlsafe(16)
+
+
+def check_order_feasibility(order: Order, db: Session) -> list[str]:
+    """
+    Verifică operațional dacă o comandă este pregătită pentru planning.
+    Returnează o listă de warnings/probleme.
+    Dacă lista este goală, comanda este fezabilă pentru planning.
+    """
+    warnings: list[str] = []
+
+    # 1. Status și problematic flag
+    if order.status != OrderStatusEnum.PENDING:
+        warnings.append("Comanda nu este în status PENDING și nu poate intra în planning.")
+
+    if order.is_problematic:
+        warnings.append(
+            f"Comanda este marcată ca problematică: {order.problem_reason or 'motiv nespecificat'}"
+        )
+
+    # 2. Adrese
+    if not order.address_pickup or not order.address_pickup.strip():
+        warnings.append("Adresa de pickup lipsește.")
+
+    if not order.address_delivery or not order.address_delivery.strip():
+        warnings.append("Adresa de delivery lipsește.")
+
+    # 3. Coordonate GPS
+    if order.pickup_lat is None or order.pickup_lon is None:
+        warnings.append("Coordonatele GPS pentru pickup lipsesc. Va fi necesară geocodare.")
+
+    if order.delivery_lat is None or order.delivery_lon is None:
+        warnings.append("Coordonatele GPS pentru delivery lipsesc. Va fi necesară geocodare.")
+
+    # 4. Greutate și volum
+    if order.kg <= 0:
+        warnings.append("Greutatea comenzii trebuie să fie pozitivă.")
+
+    if order.m3 <= 0:
+        warnings.append("Volumul comenzii trebuie să fie pozitiv.")
+
+    # 5. Capacitate vehicule disponibile
+    from app.models.vehicle import Vehicle, VehicleStatusEnum
+
+    max_capacity = (
+        db.query(Vehicle)
+        .filter(
+            Vehicle.company_id == order.company_id,
+            Vehicle.status == VehicleStatusEnum.DISPONIBIL,
+        )
+        .order_by(Vehicle.capacity_kg.desc())
+        .first()
+    )
+
+    if not max_capacity:
+        warnings.append("Nu există vehicule disponibile pentru companie.")
+    else:
+        if order.kg > max_capacity.capacity_kg:
+            warnings.append(
+                f"Greutatea comenzii depășește capacitatea maximă disponibilă ({max_capacity.capacity_kg} kg)."
+            )
+
+        if order.m3 > max_capacity.capacity_m3:
+            warnings.append(
+                f"Volumul comenzii depășește capacitatea maximă disponibilă ({max_capacity.capacity_m3} m³)."
+            )
+
+    # 6. Date calendaristice
+    if order.delivery_deadline < date.today():
+        warnings.append("Deadline-ul comenzii este în trecut.")
+
+    if order.earliest_delivery_date and order.earliest_delivery_date > order.delivery_deadline:
+        warnings.append("earliest_delivery_date este după delivery_deadline.")
+
+    # 7. Ferestre orare
+    if (
+        order.pickup_time_window_start
+        and order.pickup_time_window_end
+        and order.pickup_time_window_start >= order.pickup_time_window_end
+    ):
+        warnings.append("Fereastra orară de pickup este invalidă.")
+
+    if (
+        order.delivery_time_window_start
+        and order.delivery_time_window_end
+        and order.delivery_time_window_start >= order.delivery_time_window_end
+    ):
+        warnings.append("Fereastra orară de delivery este invalidă.")
+
+    # 8. Warnings pentru tip marfă
+    if order.type_marfa == MarfaTypeEnum.ADR:
+        warnings.append("Comanda ADR necesită verificare specială și vehicul/șofer compatibil.")
+
+    if order.type_marfa == MarfaTypeEnum.FRAGIL and order.kg > 500:
+        warnings.append("Comandă FRAGIL cu greutate mare. Necesită atenție la manipulare.")
+
+    if order.type_marfa == MarfaTypeEnum.PERISABIL:
+        warnings.append("Comandă PERISABIL. Trebuie verificat timpul maxim de transport și condițiile de temperatură.")
+
+    return warnings
 
 
 @router.post("/", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
@@ -358,6 +458,34 @@ def clear_order_problematic(
     db.refresh(order)
 
     return order
+
+@router.get("/{order_id}/feasibility", response_model=OrderFeasibilityResponse)
+def check_order_feasibility_endpoint(
+    order_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("DISPECER", "MANAGER")),
+):
+    """
+    Verifică dacă o comandă este fezabilă operațional pentru planning.
+    Returnează warnings fără să modifice automat comanda.
+    """
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.company_id == current_user.company_id,
+    ).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comanda nu a fost găsită",
+        )
+
+    warnings = check_order_feasibility(order, db)
+
+    return OrderFeasibilityResponse(
+        is_feasible=len(warnings) == 0,
+        warnings=warnings,
+    )
 
 @router.get("/{order_id}", response_model=OrderResponse)
 def get_order(
