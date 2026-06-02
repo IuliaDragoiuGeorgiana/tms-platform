@@ -16,9 +16,11 @@ def solve_pdp_for_cluster(
     pickups_deliveries: list[list[int]],
     demands: list[int],
     vehicle_capacity_kg: int,
+    time_windows: list[tuple[int, int]] | None = None,
+    service_times: list[int] | None = None,
     depot_index: int = 0,
     max_time_seconds: int = 5,
-) -> list[int] | None:
+) -> dict | None:
     """
     Optimizează ordinea stopurilor pentru un camion cu pickup & delivery.
     
@@ -44,14 +46,18 @@ def solve_pdp_for_cluster(
     3. Minimizează distanța totală
     """
     num_locations = len(distance_matrix)
+    if service_times is None:
+        service_times = [0] * num_locations
+
+    if time_windows is None:
+        # Default: orice nod poate fi vizitat oricând în ziua respectivă.
+        time_windows = [(0, 24 * 60 * 60)] * num_locations
 
     if num_locations <= 1:
-        return [0]
-
-    # Dacă avem doar depot + 1 pickup + 1 delivery, ordinea e trivială
-    if num_locations == 3 and len(pickups_deliveries) == 1:
-        p, d = pickups_deliveries[0]
-        return [depot_index, p, d, depot_index]
+        return {
+            "route": [0],
+            "arrival_times": {0: 0},
+    }
 
     # Creează modelul OR-Tools
     manager = pywrapcp.RoutingIndexManager(
@@ -74,18 +80,55 @@ def solve_pdp_for_cluster(
     def duration_callback(from_index, to_index):
         from_node = manager.IndexToNode(from_index)
         to_node = manager.IndexToNode(to_index)
-        return int(duration_matrix[from_node][to_node])
+
+        travel_time = int(duration_matrix[from_node][to_node])
+        service_time = int(service_times[from_node])
+
+        return travel_time + service_time
 
     duration_callback_index = routing.RegisterTransitCallback(duration_callback)
 
     # Dimensiune de durată (pentru a putea calcula timpul cumulat)
+    # Dimensiune de timp.
+    # CumulVar reprezintă timpul absolut din zi, în secunde de la 00:00.
     routing.AddDimension(
         duration_callback_index,
-        30 * 60,          # slack maxim 30 minute (timp de așteptare permis)
-        24 * 60 * 60,     # durata maximă a cursei: 24h în secunde
-        True,             # start cumul la zero
-        "Duration",
+        2* 60 * 60,          # slack maxim 2h
+        24 * 60 * 60,     # orizont maxim: 24h
+        False,            # nu forțăm startul la 0, pentru că plecarea poate fi la 07:00
+        "Time",
     )
+
+    time_dimension = routing.GetDimensionOrDie("Time")
+
+    # Aplică ferestrele orare pe fiecare nod.
+    # Folosim SOFT constraints: dacă nu se poate respecta fereastra,
+    # solver-ul adaugă o penalizare proporțională cu întârzierea,
+    # dar NU refuză să genereze planul.
+    PENALTY_PER_SECOND_LATE = 1000  # cât de "rău" e să întârzii (cost artificial)
+
+    for node_idx, (window_start, window_end) in enumerate(time_windows):
+        index = manager.NodeToIndex(node_idx)
+
+        if node_idx == 0:
+            # Depot-ul rămâne STRICT — camionul TREBUIE să plece din garaj
+            time_dimension.CumulVar(index).SetRange(window_start, window_end)
+        else:
+            # Toate celelalte stopuri: SOFT constraint
+            # SetSoftRange(start, end, penalizare_per_secundă)
+            # Dacă ajunge la 10:45 dar fereastra e 9:00-10:00,
+            # solver-ul adaugă (45min × 60sec × 1000) = 2.700.000 la costul total
+            # Dar GENEREAZĂ planul în loc să returneze None
+            # Sosire prea devreme → camionul AȘTEAPTĂ (hard lower bound)
+            time_dimension.CumulVar(index).SetMin(window_start)
+
+            # Sosire prea târziu → penalizare soft (nu blochează planul)
+            time_dimension.SetCumulVarSoftUpperBound(
+                index, window_end, PENALTY_PER_SECOND_LATE
+            )
+
+    # Permitem întoarcerea la depot până la finalul zilei.
+    time_dimension.CumulVar(routing.End(0)).SetRange(0, 24 * 60 * 60)
 
     # Constrângere de capacitate
     # Demands: pickup = +kg, delivery = -kg, depot = 0
@@ -104,7 +147,7 @@ def solve_pdp_for_cluster(
 
     # Constrângeri Pickup & Delivery
     # Pentru fiecare pereche: pickup trebuie vizitat ÎNAINTE de delivery
-    duration_dimension = routing.GetDimensionOrDie("Duration")
+    time_dimension = routing.GetDimensionOrDie("Time")
 
     for pickup_idx, delivery_idx in pickups_deliveries:
         pickup_index = manager.NodeToIndex(pickup_idx)
@@ -115,8 +158,8 @@ def solve_pdp_for_cluster(
 
         # Pickup ÎNAINTE de delivery (constrângere de precedence)
         routing.solver().Add(
-            duration_dimension.CumulVar(pickup_index)
-            <= duration_dimension.CumulVar(delivery_index)
+            time_dimension.CumulVar(pickup_index)
+            <= time_dimension.CumulVar(delivery_index)
         )
 
     # Parametri de căutare
@@ -135,13 +178,37 @@ def solve_pdp_for_cluster(
     if not solution:
         return None
 
-    # Extrage ruta
+    # Extrage ruta + timpii calculați de OR-Tools
     route = []
+    arrival_times = {}
+
+    # Salvăm ora de plecare din depot ÎNAINTE de a parcurge ruta
+    start_index = routing.Start(0)
+    depot_departure_seconds = solution.Value(time_dimension.CumulVar(start_index))
+
     index = routing.Start(0)
     while not routing.IsEnd(index):
         node = manager.IndexToNode(index)
         route.append(node)
+        arrival_times[node] = solution.Value(time_dimension.CumulVar(index))
         index = solution.Value(routing.NextVar(index))
-    route.append(manager.IndexToNode(index))  # adaugă ultimul nod (garajul)
+    end_node = manager.IndexToNode(index)
+    route.append(end_node)
 
-    return route
+    start_seconds = solution.Value(
+        time_dimension.CumulVar(routing.Start(0))
+    )
+
+    end_seconds = solution.Value(
+        time_dimension.CumulVar(routing.End(0))
+    )
+
+    total_duration_seconds = max(0, end_seconds - start_seconds)
+
+    return {
+        "route": route,
+        "arrival_times": arrival_times,
+        "start_seconds": start_seconds,
+        "end_seconds": end_seconds,
+        "total_duration_seconds": total_duration_seconds,
+    }
