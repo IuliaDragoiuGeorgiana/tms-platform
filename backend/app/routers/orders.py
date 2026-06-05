@@ -3,15 +3,17 @@ from sqlalchemy.orm import Session
 import uuid
 import secrets
 from datetime import date
+from app.services.service_time_service import ensure_order_service_times
 
 from app.database import get_db
-from app.models.order import Order, MarfaTypeEnum, PriorityEnum, OrderStatusEnum, OrderSourceEnum
+from app.models.order import Order, MarfaTypeEnum, PriorityEnum, OrderStatusEnum, OrderSourceEnum, ServiceTimeSourceEnum
 from app.models.user import User
 from app.schemas.order import (
     CreateOrderRequest,
     OrderResponse,
     MarkOrderProblematicRequest,
     OrderFeasibilityResponse,
+    UpdateOrderServiceTimeRequest,
 )
 from app.dependencies import require_roles, get_current_user
 
@@ -239,6 +241,8 @@ def create_order(
         special_instructions=data.special_instructions,
     )
 
+    ensure_order_service_times(db, new_order)
+
     db.add(new_order)
     db.commit()
     db.refresh(new_order)
@@ -418,6 +422,48 @@ def mark_order_problematic(
 
     order.is_problematic = True
     order.problem_reason = data.problem_reason
+
+    db.commit()
+    db.refresh(order)
+
+    return order
+
+
+@router.patch("/{order_id}/service-time", response_model=OrderResponse)
+def update_order_service_time(
+    order_id: uuid.UUID,
+    data: UpdateOrderServiceTimeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("DISPECER", "MANAGER")),
+):
+    """
+    Permite Dispecerului sau Managerului să ajusteze manual timpii de service
+    pentru o comandă înainte de planificare.
+    """
+    order = (
+        db.query(Order)
+        .filter(
+            Order.id == order_id,
+            Order.company_id == current_user.company_id,
+        )
+        .first()
+    )
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comanda nu există",
+        )
+
+    if order.status != OrderStatusEnum.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Timpii de service pot fi modificați doar pentru comenzi PENDING",
+        )
+
+    order.pickup_service_minutes = data.pickup_service_minutes
+    order.delivery_service_minutes = data.delivery_service_minutes
+    order.service_time_source = ServiceTimeSourceEnum.MANUAL
 
     db.commit()
     db.refresh(order)

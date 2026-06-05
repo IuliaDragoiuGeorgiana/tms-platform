@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, time, datetime
+from zoneinfo import ZoneInfo
 from pydantic import BaseModel, field_validator, model_validator
 
 class CreateOrderRequest(BaseModel):
@@ -74,8 +75,17 @@ class CreateOrderRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_dates_and_time_windows(self):
-        if self.delivery_deadline < date.today():
+
+        now = datetime.now(ZoneInfo("Europe/Bucharest"))
+
+        if self.delivery_deadline <  now.date():
             raise ValueError("delivery_deadline nu poate fi în trecut")
+        
+        if self.delivery_deadline == now.date():
+            if self.delivery_time_window_end and self.delivery_time_window_end <= now.time():
+                raise ValueError(
+                    "Fereastra de livrare pentru ziua de azi a trecut deja"
+                )
 
         if self.earliest_delivery_date and self.earliest_delivery_date > self.delivery_deadline:
             raise ValueError("earliest_delivery_date nu poate fi după delivery_deadline")
@@ -101,6 +111,24 @@ class MarkOrderProblematicRequest(BaseModel):
     """Motivul pentru care o comandă este marcată ca problematică."""
     problem_reason: str
 
+class UpdateOrderServiceTimeRequest(BaseModel):
+    """
+    Permite Dispecerului/Managerului să ajusteze manual timpul de service
+    pentru o comandă înainte de planificare.
+    """
+    pickup_service_minutes: int
+    delivery_service_minutes: int
+
+    @field_validator("pickup_service_minutes", "delivery_service_minutes")
+    @classmethod
+    def valid_service_time(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("Timpul de service trebuie să fie pozitiv")
+
+        if value > 240:
+            raise ValueError("Timpul de service nu poate depăși 240 minute")
+
+        return value
 
 class OrderFeasibilityResponse(BaseModel):
     is_feasible: bool
@@ -132,6 +160,11 @@ class OrderResponse(BaseModel):
     m3: float
     type_marfa: str
     priority: str
+
+    # Service time
+    pickup_service_minutes: int | None
+    delivery_service_minutes: int | None
+    service_time_source: str
 
     # Planning
     delivery_deadline: date

@@ -18,6 +18,11 @@ class PriorityEnum(str, enum.Enum):
     CRITIC = "CRITIC"
 
 
+class ServiceTimeSourceEnum(str, enum.Enum):
+    AUTO = "AUTO"
+    MANUAL = "MANUAL"
+
+
 class OrderStatusEnum(str, enum.Enum):
     PENDING = "PENDING"
     PLANNED = "PLANNED"
@@ -54,6 +59,16 @@ class Order(UUIDPrimaryKey, FullTimestampMixin, Base):
     delivery_lon: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     kg: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     m3: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+
+    pickup_service_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    delivery_service_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    service_time_source: Mapped[ServiceTimeSourceEnum] = mapped_column(
+        Enum(ServiceTimeSourceEnum),
+        default=ServiceTimeSourceEnum.AUTO,
+        nullable=False,
+    )
+
     type_marfa: Mapped[MarfaTypeEnum] = mapped_column(
         Enum(MarfaTypeEnum), default=MarfaTypeEnum.STANDARD, nullable=False
     )

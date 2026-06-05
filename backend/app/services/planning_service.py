@@ -15,6 +15,7 @@ from app.models.planning_session import PlanningSession, PlanningStrategyEnum, P
 from app.services.ors_service import geocode, get_distance_matrix
 from app.services.clustering_service import calculate_num_clusters, cluster_orders
 from app.services.vrp_service import solve_pdp_for_cluster
+from app.services.service_time_service import ensure_order_service_times
 from zoneinfo import ZoneInfo
 from sqlalchemy import or_
 
@@ -267,10 +268,12 @@ def run_planning(
         depot_window = (5 * 3600, 24 * 3600)
 
         time_windows = [depot_window]
-        service_times = [0]               # depot
+        service_times = [0]  # depot
 
-        # Pickup time windows
+        # Pickup time windows + pickup service times
         for order in cluster_orders_list:
+            ensure_order_service_times(db, order)
+
             if order.pickup_time_window_start and order.pickup_time_window_end:
                 time_windows.append((
                     time_to_seconds(order.pickup_time_window_start),
@@ -279,10 +282,12 @@ def run_planning(
             else:
                 time_windows.append(full_day_window)
 
-            service_times.append(30 * 60)  # 30 minute pickup
+            service_times.append(int(order.pickup_service_minutes or 0) * 60)
 
-        # Delivery time windows
+        # Delivery time windows + delivery service times
         for order in cluster_orders_list:
+            ensure_order_service_times(db, order)
+
             if order.delivery_time_window_start and order.delivery_time_window_end:
                 time_windows.append((
                     time_to_seconds(order.delivery_time_window_start),
@@ -291,8 +296,8 @@ def run_planning(
             else:
                 time_windows.append(full_day_window)
 
-            service_times.append(20 * 60)  # 20 minute delivery
-
+            service_times.append(int(order.delivery_service_minutes or 0) * 60)
+        
         # Calculează matricea de distanțe
         matrix_result = get_distance_matrix(all_coords)
 
@@ -355,8 +360,6 @@ def run_planning(
 
         # Creează TripStops în ordinea optimizată
         sequence = 1
-        service_time_pickup = 30     # 30 min încărcare
-        service_time_delivery = 20   # 20 min descărcare
 
         for route_idx in optimized_route:
             if route_idx == 0:  # skip depot
@@ -367,12 +370,10 @@ def run_planning(
                 # E un pickup (indexele 1..N)
                 order_idx = route_idx - 1
                 stop_type = StopTypeEnum.PICKUP
-                service_time = service_time_pickup
             else:
                 # E un delivery (indexele N+1..2N)
                 order_idx = route_idx - 1 - num_orders_in_cluster
                 stop_type = StopTypeEnum.DELIVERY
-                service_time = service_time_delivery
 
             if order_idx >= len(cluster_orders_list):
                 continue
@@ -381,6 +382,7 @@ def run_planning(
 
             # Calculează ETA
            # Calculează ETA
+            eta = None
             if solver_arrival_times and route_idx in solver_arrival_times:
                 # FOLOSIM TIMPII EXACTI DE LA OR-Tools
                 # solver_arrival_times[route_idx] = secunde de la 00:00
