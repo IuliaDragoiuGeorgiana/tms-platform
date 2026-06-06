@@ -34,16 +34,21 @@ def time_to_seconds(t) -> int:
 
 def choose_vehicle_for_cluster(cluster_orders: list[Order], vehicles: list[Vehicle]) -> Vehicle | None:
     """
-    Alege cel mai mic vehicul disponibil care poate transporta totalul clusterului.
-    Verifică atât kg, cât și m3.
+    Alege cel mai mic vehicul disponibil care poate transporta comenzile din cluster.
+
+    Pentru PDP, nu verificăm totalul kg/m3 al tuturor comenzilor ca și cum ar fi
+    simultan în vehicul, deoarece pickup-urile și delivery-urile pot alterna.
+    Verificăm ca fiecare comandă individuală să încapă în vehicul.
+    Capacitatea dinamică este apoi verificată de OR-Tools prin dimensiunile
+    Capacity și Volume.
     """
-    total_kg = sum(float(order.kg) for order in cluster_orders)
-    total_m3 = sum(float(order.m3) for order in cluster_orders)
+    max_order_kg = max(float(order.kg) for order in cluster_orders)
+    max_order_m3 = max(float(order.m3) for order in cluster_orders)
 
     compatible_vehicles = [
         vehicle for vehicle in vehicles
-        if float(vehicle.capacity_kg) >= total_kg
-        and float(vehicle.capacity_m3) >= total_m3
+        if float(vehicle.capacity_kg) >= max_order_kg
+        and float(vehicle.capacity_m3) >= max_order_m3
     ]
 
     if not compatible_vehicles:
@@ -53,7 +58,6 @@ def choose_vehicle_for_cluster(cluster_orders: list[Order], vehicles: list[Vehic
         compatible_vehicles,
         key=lambda vehicle: (float(vehicle.capacity_kg), float(vehicle.capacity_m3))
     )[0]
-
 
 def priority_rank(order: Order) -> int:
     """
@@ -299,6 +303,19 @@ def run_planning(
             demands.append(int(float(order.kg)))         # pickup: +kg
         for order in cluster_orders_list:
             demands.append(-int(float(order.kg)))        # delivery: -kg
+
+        # Volume demands: depot=0, pickups=+m3, deliveries=-m3
+        # Folosim unități întregi scalate: 1 m³ = 100 unități.
+        # Exemplu: 2.5 m³ -> 250
+        volume_demands = [0]  # depot
+        for order in cluster_orders_list:
+            volume_demands.append(int(float(order.m3) * 100))   # pickup: +m3
+
+        for order in cluster_orders_list:
+            volume_demands.append(-int(float(order.m3) * 100))  # delivery: -m3
+
+        vehicle_capacity_m3_scaled = int(float(vehicle.capacity_m3) * 100)
+
         # Time windows și service times pentru fiecare nod.
         # Structura trebuie să fie aceeași ca all_coords/demands:
         # index 0 = depot
@@ -356,6 +373,8 @@ def run_planning(
                 pickups_deliveries=pickups_deliveries,
                 demands=demands,
                 vehicle_capacity_kg=int(float(vehicle.capacity_kg)),
+                volume_demands=volume_demands,
+                vehicle_capacity_m3=vehicle_capacity_m3_scaled,
                 time_windows=time_windows,
                 service_times=service_times,
             )

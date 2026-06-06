@@ -20,6 +20,8 @@ def solve_pdp_for_cluster(
     service_times: list[int] | None = None,
     depot_index: int = 0,
     max_time_seconds: int = 5,
+    volume_demands: list[int] | None = None,
+    vehicle_capacity_m3: int | None = None,
 ) -> dict | None:
     """
     Optimizează ordinea stopurilor pentru un camion cu pickup & delivery.
@@ -144,6 +146,21 @@ def solve_pdp_for_cluster(
         True,                       # start cumul la zero
         "Capacity",
     )
+        # Constrângere de volum m³
+    # volume_demands: pickup = +m3, delivery = -m3, depot = 0
+    if volume_demands is not None and vehicle_capacity_m3 is not None:
+        def volume_callback(from_index):
+            from_node = manager.IndexToNode(from_index)
+            return volume_demands[from_node]
+
+        volume_callback_index = routing.RegisterUnaryTransitCallback(volume_callback)
+        routing.AddDimensionWithVehicleCapacity(
+            volume_callback_index,
+            0,                       # fără slack
+            [vehicle_capacity_m3],   # capacitate maximă volum
+            True,                    # start cumul la zero
+            "Volume",
+        )
 
     # Constrângeri Pickup & Delivery
     # Pentru fiecare pereche: pickup trebuie vizitat ÎNAINTE de delivery
