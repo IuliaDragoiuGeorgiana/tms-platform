@@ -4,6 +4,7 @@ import uuid
 import secrets
 from datetime import date
 from app.services.service_time_service import ensure_order_service_times
+from app.services.order_feasibility_service import check_order_operational_warnings
 
 from app.database import get_db
 from app.models.order import Order, MarfaTypeEnum, PriorityEnum, OrderStatusEnum, OrderSourceEnum, ServiceTimeSourceEnum
@@ -427,6 +428,43 @@ def mark_order_problematic(
     db.refresh(order)
 
     return order
+
+@router.get("/{order_id}/operational-warnings", response_model=OrderFeasibilityResponse)
+def check_order_feasibility(
+    order_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("DISPECER", "MANAGER")),
+):
+    """
+    Verifică o comandă din punct de vedere operațional înainte de planning.
+    Nu marchează automat comanda ca problematică.
+    Returnează warnings pentru Dispecer/Manager.
+    """
+    order = (
+        db.query(Order)
+        .filter(
+            Order.id == order_id,
+            Order.company_id == current_user.company_id,
+        )
+        .first()
+    )
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comanda nu există",
+        )
+
+    ensure_order_service_times(db, order)
+    warnings = check_order_operational_warnings(order)
+
+    db.commit()
+    db.refresh(order)
+
+    return OrderFeasibilityResponse(
+        is_feasible=True,
+        warnings=warnings,
+    )
 
 
 @router.patch("/{order_id}/service-time", response_model=OrderResponse)

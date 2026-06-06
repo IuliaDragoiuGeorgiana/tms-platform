@@ -16,6 +16,7 @@ from app.services.ors_service import geocode, get_distance_matrix
 from app.services.clustering_service import calculate_num_clusters, cluster_orders
 from app.services.vrp_service import solve_pdp_for_cluster
 from app.services.service_time_service import ensure_order_service_times
+from app.services.order_feasibility_service import check_order_operational_warnings
 from zoneinfo import ZoneInfo
 from sqlalchemy import or_
 
@@ -53,6 +54,21 @@ def choose_vehicle_for_cluster(cluster_orders: list[Order], vehicles: list[Vehic
         key=lambda vehicle: (float(vehicle.capacity_kg), float(vehicle.capacity_m3))
     )[0]
 
+
+def priority_rank(order: Order) -> int:
+    """
+    Returnează rangul priorității pentru sortare.
+    Valoare mai mică = prioritate mai mare.
+    """
+    priority = order.priority.value if hasattr(order.priority, "value") else str(order.priority)
+
+    ranks = {
+        "CRITIC": 0,
+        "URGENT": 1,
+        "NORMAL": 2,
+    }
+
+    return ranks.get(priority, 2)
 
 def run_planning(
     db: Session,
@@ -121,6 +137,17 @@ def run_planning(
 
     if not geocoded_orders:
         return {"error": "Nicio comandă nu a putut fi geocodată complet (pickup + delivery)"}
+
+    # Prioritizează comenzile înainte de clustering/planning.
+    # CRITIC -> URGENT -> NORMAL, apoi deadline mai apropiat.
+    geocoded_orders = sorted(
+        geocoded_orders,
+        key=lambda order: (
+            priority_rank(order),
+            order.delivery_deadline,
+            order.created_at,
+        ),
+    )
 
     # ==========================================
     # PAS 3: Ia vehiculele și driverii disponibili
@@ -198,11 +225,24 @@ def run_planning(
     # ==========================================
     trips_created = []
     all_warnings = []
+    all_operational_warnings = []
     available_vehicles = vehicles.copy()
     available_drivers = drivers.copy()
 
     for cluster_idx in sorted(clusters.keys()):
         cluster_orders_list = clusters[cluster_idx]
+        for order in cluster_orders_list:
+            ensure_order_service_times(db, order)
+            order_warnings = check_order_operational_warnings(order)
+
+            for warning in order_warnings:
+                all_operational_warnings.append({
+                    "order_id": str(order.id),
+                    "order_ref": order.order_ref,
+                    "type": "OPERATIONAL_WARNING",
+                    "message": warning,
+                    "severity": "WARNING",
+                })
 
         vehicle = choose_vehicle_for_cluster(cluster_orders_list, available_vehicles)
 
@@ -522,6 +562,7 @@ def run_planning(
         "orders_on_time": orders_on_time,
         "orders_delayed": orders_delayed,
         "warnings": all_warnings,
+        "operational_warnings": all_operational_warnings,
     }
 
     db.commit()
@@ -535,4 +576,7 @@ def run_planning(
         "delayed_orders_count": orders_delayed,
         "warnings_count": len(all_warnings),
         "warnings": all_warnings,
+        "operational_warnings_count": len(all_operational_warnings),
+        "operational_warnings": all_operational_warnings,
+
     }
