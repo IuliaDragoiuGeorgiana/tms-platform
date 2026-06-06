@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, admin, companies, vehicles, drivers, orders, planning, trips
+from app.routers import auth, admin, companies, vehicles, drivers, orders, planning, trips, system_config
 
 app = FastAPI(
     title="TMS Platform",
@@ -24,6 +24,7 @@ app.include_router(drivers.router)
 app.include_router(orders.router)
 app.include_router(planning.router)
 app.include_router(trips.router)
+app.include_router(system_config.router)
 
 @app.get("/")
 def root():
