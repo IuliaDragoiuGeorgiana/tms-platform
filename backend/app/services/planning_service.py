@@ -17,6 +17,7 @@ from app.services.clustering_service import calculate_num_clusters, cluster_orde
 from app.services.vrp_service import solve_pdp_for_cluster
 from app.services.service_time_service import ensure_order_service_times
 from app.services.order_feasibility_service import check_order_operational_warnings
+from app.services.load_compatibility_service import check_load_compatibility_warnings
 from zoneinfo import ZoneInfo
 from sqlalchemy import or_
 
@@ -73,6 +74,35 @@ def priority_rank(order: Order) -> int:
     }
 
     return ranks.get(priority, 2)
+
+
+def calculate_peak_loads(
+    route: list[int],
+    kg_demands: list[int],
+    volume_demands: list[int],
+) -> tuple[int, int]:
+    """
+    Calculează încărcarea maximă simultană pe ruta optimizată.
+
+    Pentru PDP, peak load este mai corect decât suma totală,
+    deoarece pickup-urile și delivery-urile pot alterna.
+    """
+    current_kg = 0
+    current_volume = 0
+
+    peak_kg = 0
+    peak_volume = 0
+
+    for node_idx in route:
+        current_kg += kg_demands[node_idx]
+        current_volume += volume_demands[node_idx]
+
+        peak_kg = max(peak_kg, current_kg)
+        peak_volume = max(peak_volume, current_volume)
+
+    return peak_kg, peak_volume
+
+
 
 def run_planning(
     db: Session,
@@ -230,6 +260,7 @@ def run_planning(
     trips_created = []
     all_warnings = []
     all_operational_warnings = []
+    all_load_compatibility_warnings = []
     available_vehicles = vehicles.copy()
     available_drivers = drivers.copy()
 
@@ -403,6 +434,15 @@ def run_planning(
         total_minutes = round(
             solver_result.get("total_duration_seconds", 0) / 60
         )
+
+        peak_kg, peak_volume_scaled = calculate_peak_loads(
+        route=optimized_route,
+        kg_demands=demands,
+        volume_demands=volume_demands,
+        )
+        peak_m3 = peak_volume_scaled / 100
+
+    
         # Creează Trip-ul
         trip = Trip(
             company_id=company_id,
@@ -416,6 +456,19 @@ def run_planning(
         )
         db.add(trip)
         db.flush()
+        load_warnings = check_load_compatibility_warnings(
+            cluster_orders=cluster_orders_list,
+            vehicle=vehicle,
+            total_minutes=total_minutes,
+            peak_kg=peak_kg,
+            peak_m3=peak_m3,
+        )
+
+        for warning in load_warnings:
+            warning["trip_id"] = str(trip.id)
+            warning["vehicle_plate"] = vehicle.plate
+            warning["cluster_idx"] = cluster_idx
+            all_load_compatibility_warnings.append(warning)
 
         # Creează TripStops în ordinea optimizată
         sequence = 1
@@ -582,7 +635,9 @@ def run_planning(
         "orders_delayed": orders_delayed,
         "warnings": all_warnings,
         "operational_warnings": all_operational_warnings,
+        "load_compatibility_warnings": all_load_compatibility_warnings,
     }
+
 
     db.commit()
     return {
@@ -597,5 +652,6 @@ def run_planning(
         "warnings": all_warnings,
         "operational_warnings_count": len(all_operational_warnings),
         "operational_warnings": all_operational_warnings,
-
+        "load_compatibility_warnings_count": len(all_load_compatibility_warnings),
+        "load_compatibility_warnings": all_load_compatibility_warnings,
     }

@@ -52,17 +52,6 @@ def check_order_operational_warnings(order: Order) -> list[str]:
             "Marfă PERISABILĂ: timpul de livrare și așteptare trebuie monitorizate atent."
         )
 
-    # Cantitate mare
-    if kg >= 1500:
-        warnings.append(
-            "Greutate mare: verifică încărcarea vehiculului și timpul de manipulare."
-        )
-
-    if m3 >= 8:
-        warnings.append(
-            "Volum mare: verifică spațiul disponibil în vehicul."
-        )
-
     # Service time mare
     if total_service >= 90:
         warnings.append(
