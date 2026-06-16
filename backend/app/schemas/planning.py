@@ -154,3 +154,12 @@ class ChangeVehicleRequest(BaseModel):
     Dispecerul trimite UUID-ul noului vehicul.
     """
     vehicle_id: uuid.UUID
+
+
+class AddOrderToTripRequest(BaseModel):
+    """
+    Schema pentru adăugarea unei comenzi PENDING într-un trip PROPOSED.
+
+    Dispecerul trimite UUID-ul comenzii care trebuie adăugată.
+    """
+    order_id: uuid.UUID

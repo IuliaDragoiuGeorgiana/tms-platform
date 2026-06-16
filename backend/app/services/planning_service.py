@@ -1705,6 +1705,663 @@ def change_trip_vehicle(
     }
 
 
+def _get_trip_start_seconds(trip: Trip) -> int:
+    """
+    Returnează ora de start estimată a trip-ului, în secunde de la 00:00.
+
+    Folosește primul eta_planned din stopuri.
+    Dacă nu există ETA, folosește 05:00 ca fallback.
+    """
+    stops = sorted(trip.stops, key=lambda stop: stop.sequence)
+
+    for stop in stops:
+        if stop.eta_planned:
+            return (
+                stop.eta_planned.hour * 3600
+                + stop.eta_planned.minute * 60
+                + stop.eta_planned.second
+            )
+
+    return 5 * 3600
+
+
+def _get_unique_orders_from_trip(trip: Trip) -> list[Order]:
+    """
+    Returnează comenzile unice dintr-un trip, în ordinea apariției primului stop.
+
+    Deoarece fiecare comandă are două stopuri:
+    - PICKUP
+    - DELIVERY
+
+    trebuie să evităm dublarea comenzilor.
+    """
+    result = []
+    seen_order_ids = set()
+
+    stops = sorted(trip.stops, key=lambda stop: stop.sequence)
+
+    for stop in stops:
+        if not stop.order:
+            continue
+
+        if stop.order.id in seen_order_ids:
+            continue
+
+        seen_order_ids.add(stop.order.id)
+        result.append(stop.order)
+
+    return result
+
+
+def _validate_dynamic_load_on_route(
+    trip: Trip,
+    orders: list[Order],
+    route: list[int],
+) -> None:
+    """
+    Verifica dacă încărcarea dinamică pe noua rută nu depășește capacitatea.
+
+    Logica:
+    - La fiecare PICKUP adaugă kg/m³
+    - La fiecare DELIVERY scade kg/m³
+    - După fiecare stop, verifica că nu depășim capacitatea
+    """
+    vehicle = trip.vehicle
+
+    if not vehicle:
+        return
+
+    current_kg = 0.0
+    current_m3 = 0.0
+    num_orders = len(orders)
+
+    for route_idx in route:
+        if route_idx == 0:
+            continue
+
+        if route_idx <= num_orders:
+            order = orders[route_idx - 1]
+            order_kg = float(order.kg)
+            order_m3 = float(order.m3)
+
+            current_kg += order_kg
+            current_m3 += order_m3
+        else:
+            order = orders[route_idx - 1 - num_orders]
+            current_kg -= float(order.kg)
+            current_m3 -= float(order.m3)
+
+        if current_kg > float(vehicle.capacity_kg):
+            raise ValueError(
+                f"Ruta reoptimizată depășește capacitate kg: "
+                f"{current_kg:.2f} kg > {float(vehicle.capacity_kg)} kg"
+            )
+
+        if current_m3 > float(vehicle.capacity_m3):
+            raise ValueError(
+                f"Ruta reoptimizată depășește capacitate m³: "
+                f"{current_m3:.2f} m³ > {float(vehicle.capacity_m3)} m³"
+            )
+
+
+def _validate_time_windows_on_route(
+    orders: list[Order],
+    solver_result: dict,
+) -> None:
+    """
+    Verifica dacă ETA-urile noi respectă time windows-urile comenzilor.
+    """
+    arrival_times = solver_result.get("arrival_times", {})
+    num_orders = len(orders)
+
+    for i, order in enumerate(orders):
+        pickup_idx = i + 1
+        delivery_idx = i + 1 + num_orders
+
+        if order.pickup_time_window_end and pickup_idx in arrival_times:
+            arrival_sec = arrival_times[pickup_idx]
+            window_end = time_to_seconds(order.pickup_time_window_end)
+
+            if arrival_sec > window_end:
+                raise ValueError(
+                    f"Comanda {order.order_ref} nu se încadrează în pickup window: "
+                    f"ETA {arrival_sec}s > window {window_end}s"
+                )
+
+        if order.delivery_time_window_end and delivery_idx in arrival_times:
+            arrival_sec = arrival_times[delivery_idx]
+            window_end = time_to_seconds(order.delivery_time_window_end)
+
+            if arrival_sec > window_end:
+                raise ValueError(
+                    f"Comanda {order.order_ref} nu se încadrează în delivery window: "
+                    f"ETA {arrival_sec}s > window {window_end}s"
+                )
+
+
+def _validate_reoptimized_trip(
+    trip: Trip,
+    orders: list[Order],
+    solver_result: dict,
+) -> None:
+    """
+    Validează dacă trip-ul reoptimizat respectă:
+    - Programul șoferului (shift_start și shift_end)
+    - Capacitatea dinamică pe noua rută
+    - Time windows ale comenzilor
+    """
+    trip_start_seconds = solver_result.get("start_seconds", 5 * 3600)
+    trip_end_seconds = solver_result.get(
+        "end_seconds",
+        trip_start_seconds + solver_result.get("total_duration_seconds", 0),
+    )
+
+    if trip.driver and trip.driver.shift_start and trip.driver.shift_end:
+        shift_start_seconds = time_to_seconds(trip.driver.shift_start)
+        shift_end_seconds = time_to_seconds(trip.driver.shift_end)
+
+        # Pentru ture care trec peste miezul nopții
+        if shift_end_seconds <= shift_start_seconds:
+            shift_end_seconds += 24 * 3600
+
+        # Ajustare dacă trip-ul trece peste miezul nopții
+        if trip_end_seconds <= trip_start_seconds:
+            trip_end_seconds += 24 * 3600
+
+        if trip_start_seconds < shift_start_seconds or trip_end_seconds > shift_end_seconds:
+            raise ValueError(
+                "Ruta reoptimizată nu se încadrează în programul de lucru al șoferului"
+            )
+
+    _validate_dynamic_load_on_route(trip, orders, solver_result["route"])
+
+    _validate_time_windows_on_route(orders, solver_result)
+
+
+def _solve_orders_for_vehicle(
+    db: Session,
+    orders: list[Order],
+    vehicle: Vehicle,
+    depot_start_seconds: int,
+) -> dict:
+    """
+    Rulează ORS + OR-Tools pentru o listă de comenzi și un vehicul fix.
+
+    Folosit la:
+    - reoptimizare după scoaterea unei comenzi din trip;
+    - reoptimizare după adăugarea unei comenzi în trip.
+    """
+    solver_data = _build_solver_data(
+        orders=orders,
+        db=db,
+        depot_start_seconds=depot_start_seconds,
+    )
+
+    matrix_result = get_distance_matrix(solver_data["coords"])
+
+    if not matrix_result:
+        raise ValueError("Nu s-a putut recalcula matricea de distanțe pentru trip")
+
+    solver_result = solve_pdp_for_cluster(
+        distance_matrix=matrix_result["distances"],
+        duration_matrix=matrix_result["durations"],
+        pickups_deliveries=solver_data["pickups_deliveries"],
+        demands=solver_data["demands"],
+        vehicle_capacity_kg=int(float(vehicle.capacity_kg)),
+        volume_demands=solver_data["volume_demands"],
+        vehicle_capacity_m3=int(float(vehicle.capacity_m3) * 100),
+        time_windows=solver_data["time_windows"],
+        service_times=solver_data["service_times"],
+        max_time_seconds=2,
+    )
+
+    if not solver_result:
+        raise ValueError(
+            "Nu s-a găsit o rută fezabilă pentru combinația de comenzi. "
+            "Cauze posibile: capacitate kg/m³ depășită, time windows incompatibile, "
+            "durată prea mare pentru ziua respectivă, sau imposibilitate de rutare."
+        )
+
+    optimized_route = solver_result["route"]
+
+    total_km = 0.0
+
+    for i in range(len(optimized_route) - 1):
+        from_idx = optimized_route[i]
+        to_idx = optimized_route[i + 1]
+        total_km += matrix_result["distances"][from_idx][to_idx] / 1000
+
+    total_minutes = round(
+        solver_result.get("total_duration_seconds", 0) / 60
+    )
+
+    return {
+        "solver_data": solver_data,
+        "matrix_result": matrix_result,
+        "solver_result": solver_result,
+        "total_km": round(total_km, 1),
+        "total_minutes": round(total_minutes),
+    }
+
+
+def _reoptimize_trip_with_orders(
+    db: Session,
+    trip: Trip,
+    orders: list[Order],
+) -> dict:
+    """
+    Reoptimizează un trip existent folosind lista de comenzi primită.
+
+    Face:
+    - reconstruire solver data;
+    - recalculare matrice distanță/durată;
+    - rulare OR-Tools PDP;
+    - ștergere stopuri vechi;
+    - creare stopuri noi;
+    - actualizare planned_km și planned_duration_min.
+    """
+    if not orders:
+        raise ValueError("Nu există comenzi pentru reoptimizarea trip-ului")
+
+    vehicle = trip.vehicle
+
+    if not vehicle:
+        raise ValueError("Trip-ul nu are vehicul asociat")
+
+    # Păstrează ora de start a trip-ului existent, nu folosi mereu 05:00
+    depot_start_seconds = _get_trip_start_seconds(trip)
+
+    # Rulează ORS + OR-Tools pentru ordine
+    route_result = _solve_orders_for_vehicle(
+        db=db,
+        orders=orders,
+        vehicle=vehicle,
+        depot_start_seconds=depot_start_seconds,
+    )
+
+    solver_result = route_result["solver_result"]
+    optimized_route = solver_result["route"]
+    solver_arrival_times = solver_result.get("arrival_times", {})
+    total_km = route_result["total_km"]
+    total_minutes = route_result["total_minutes"]
+
+    # Validează că ruta reoptimizată respectă toate constrângerile
+    _validate_reoptimized_trip(trip, orders, solver_result)
+
+    old_stops = db.query(TripStop).filter(
+        TripStop.trip_id == trip.id,
+    ).all()
+
+    for stop in old_stops:
+        db.delete(stop)
+
+    db.flush()
+
+    sequence = 1
+    num_orders = len(orders)
+    new_stops_preview = []
+
+    for route_idx in optimized_route:
+        if route_idx == 0:
+            continue
+
+        if route_idx <= num_orders:
+            order_idx = route_idx - 1
+            stop_type = StopTypeEnum.PICKUP
+        else:
+            order_idx = route_idx - 1 - num_orders
+            stop_type = StopTypeEnum.DELIVERY
+
+        if order_idx >= num_orders:
+            continue
+
+        order = orders[order_idx]
+
+        eta = None
+
+        if solver_arrival_times and route_idx in solver_arrival_times:
+            arrival_seconds = solver_arrival_times[route_idx]
+
+            eta = datetime(
+                trip.planned_date.year,
+                trip.planned_date.month,
+                trip.planned_date.day,
+                tzinfo=LOCAL_TZ,
+            ) + timedelta(seconds=arrival_seconds)
+
+        trip_stop = TripStop(
+            trip_id=trip.id,
+            order_id=order.id,
+            sequence=sequence,
+            stop_type=stop_type,
+            eta_planned=eta,
+            status=StopStatusEnum.PENDING,
+        )
+
+        db.add(trip_stop)
+
+        new_stops_preview.append({
+            "sequence": sequence,
+            "order_id": str(order.id),
+            "order_ref": order.order_ref,
+            "stop_type": stop_type.value,
+            "eta_planned": eta.isoformat() if eta else None,
+        })
+
+        sequence += 1
+
+    trip.planned_km = round(total_km, 1)
+    trip.planned_duration_min = round(total_minutes)
+
+    return {
+        "planned_km": trip.planned_km,
+        "planned_duration_min": trip.planned_duration_min,
+        "num_stops": sequence - 1,
+        "stops": new_stops_preview,
+    }
+
+
+def remove_order_from_trip(
+    db: Session,
+    trip_id: uuid.UUID,
+    order_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> dict:
+    """
+    Scoate o comandă dintr-un trip PROPOSED și reoptimizează ruta rămasă.
+
+    Efecte:
+    - comanda scoasă revine în PENDING;
+    - assigned_delivery_date devine NULL;
+    - stopurile trip-ului sunt regenerate;
+    - planned_km și planned_duration_min sunt recalculate;
+    - ETA-urile sunt recalculate;
+    - dacă trip-ul rămâne fără comenzi, trip-ul este șters.
+    """
+    trip = db.query(Trip).filter(
+        Trip.id == trip_id,
+        Trip.company_id == company_id,
+    ).first()
+
+    if not trip:
+        raise ValueError("Trip-ul nu a fost găsit")
+
+    if trip.status != TripStatusEnum.PROPOSED:
+        raise ValueError(
+            f"Trip-ul nu este în stare PROPOSED. Status actual: {trip.status.value}"
+        )
+
+    if trip.planning_session_id:
+        session = db.query(PlanningSession).filter(
+            PlanningSession.id == trip.planning_session_id,
+            PlanningSession.company_id == company_id,
+        ).first()
+
+        if session and session.status != PlanningStatusEnum.PROPOSED:
+            raise ValueError(
+                f"Sesiunea nu este în stare PROPOSED. Status actual: {session.status.value}"
+            )
+
+    order_to_remove = db.query(Order).filter(
+        Order.id == order_id,
+        Order.company_id == company_id,
+    ).first()
+
+    if not order_to_remove:
+        raise ValueError("Comanda nu a fost găsită")
+
+    stops_for_order = db.query(TripStop).filter(
+        TripStop.trip_id == trip_id,
+        TripStop.order_id == order_id,
+    ).all()
+
+    if not stops_for_order:
+        raise ValueError("Comanda nu există în acest trip")
+
+    existing_orders = _get_unique_orders_from_trip(trip)
+
+    remaining_orders = [
+        order for order in existing_orders
+        if order.id != order_id
+    ]
+
+    if not remaining_orders:
+        old_trip_id = trip.id
+
+        old_stops = db.query(TripStop).filter(
+            TripStop.trip_id == trip.id,
+        ).all()
+
+        for stop in old_stops:
+            db.delete(stop)
+
+        order_to_remove.status = OrderStatusEnum.PENDING
+        order_to_remove.assigned_delivery_date = None
+
+        db.delete(trip)
+        db.commit()
+
+        return {
+            "trip_id": str(old_trip_id),
+            "removed_order_id": str(order_to_remove.id),
+            "removed_order_ref": order_to_remove.order_ref,
+            "removed_order_status": order_to_remove.status.value,
+            "trip_deleted": True,
+            "message": (
+                "Comanda a fost scoasă din trip și a revenit în PENDING. "
+                "Trip-ul a fost șters deoarece nu mai avea alte comenzi."
+            ),
+        }
+
+    reoptimization_result = _reoptimize_trip_with_orders(
+        db=db,
+        trip=trip,
+        orders=remaining_orders,
+    )
+
+    # Setează comanda scoasă în PENDING doar după reoptimizare reușită
+    order_to_remove.status = OrderStatusEnum.PENDING
+    order_to_remove.assigned_delivery_date = None
+
+    db.commit()
+    db.refresh(trip)
+
+    return {
+        "trip_id": str(trip.id),
+        "removed_order_id": str(order_to_remove.id),
+        "removed_order_ref": order_to_remove.order_ref,
+        "removed_order_status": order_to_remove.status.value,
+        "trip_deleted": False,
+        "new_planned_km": float(trip.planned_km),
+        "new_planned_duration_min": trip.planned_duration_min,
+        "remaining_orders": len(remaining_orders),
+        "remaining_stops": reoptimization_result["num_stops"],
+        "stops": reoptimization_result["stops"],
+        "message": (
+            "Comanda a fost scoasă din trip, a revenit în PENDING, "
+            "iar ruta rămasă a fost reoptimizată."
+        ),
+    }
+
+
+def add_order_to_trip(
+    db: Session,
+    trip_id: uuid.UUID,
+    order_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> dict:
+    """
+    Adaugă o comandă PENDING într-un trip PROPOSED și reoptimizează ruta.
+
+    Păstrează:
+    - același șofer;
+    - același vehicul;
+    - aceeași dată;
+    - aceeași sesiune de planificare.
+
+    Validări complete:
+    - Trip și session PROPOSED;
+    - Comanda PENDING și neproblematică;
+    - Comanda nu e deja în trip;
+    - Comanda eligibilă pentru data trip-ului;
+    - Ruta cu noua comandă fezabilă.
+
+    Dacă vreo validare eșuează, operația nu modifică nimic.
+    """
+    trip = db.query(Trip).filter(
+        Trip.id == trip_id,
+        Trip.company_id == company_id,
+    ).first()
+
+    if not trip:
+        raise ValueError("Trip-ul nu a fost găsit")
+
+    if trip.status != TripStatusEnum.PROPOSED:
+        raise ValueError(
+            f"Trip-ul nu este în stare PROPOSED. Status actual: {trip.status.value}"
+        )
+
+    if trip.planning_session_id:
+        session = db.query(PlanningSession).filter(
+            PlanningSession.id == trip.planning_session_id,
+            PlanningSession.company_id == company_id,
+        ).first()
+
+        if session and session.status != PlanningStatusEnum.PROPOSED:
+            raise ValueError(
+                f"Sesiunea nu este în stare PROPOSED. Status actual: {session.status.value}"
+            )
+
+    if not trip.vehicle:
+        raise ValueError("Trip-ul nu are vehicul asociat")
+
+    if not trip.driver:
+        raise ValueError("Trip-ul nu are șofer asociat")
+
+    order_to_add = db.query(Order).filter(
+        Order.id == order_id,
+        Order.company_id == company_id,
+    ).first()
+
+    if not order_to_add:
+        raise ValueError("Comanda nu a fost găsită")
+
+    if order_to_add.status != OrderStatusEnum.PENDING:
+        raise ValueError(
+            f"Comanda nu poate fi adăugată deoarece nu este PENDING. "
+            f"Status actual: {order_to_add.status.value}"
+        )
+
+    if order_to_add.is_problematic:
+        raise ValueError(
+            "Comanda este marcată ca problematică și nu poate fi adăugată în trip"
+        )
+
+    existing_orders = _get_unique_orders_from_trip(trip)
+    existing_order_ids = {order.id for order in existing_orders}
+
+    if order_to_add.id in existing_order_ids:
+        raise ValueError("Comanda există deja în acest trip")
+
+    earliest_day, latest_day = _get_order_planning_window(order_to_add)
+
+    if trip.planned_date < earliest_day or trip.planned_date > latest_day:
+        raise ValueError(
+            "Comanda nu este eligibilă pentru data acestui trip. "
+            f"Data trip-ului: {trip.planned_date}. "
+            f"Interval eligibil comandă: {earliest_day} - {latest_day}"
+        )
+
+    if order_to_add.pickup_lat is None or order_to_add.pickup_lon is None:
+        result = geocode(order_to_add.address_pickup)
+
+        if not result:
+            raise ValueError(
+                "Comanda nu poate fi adăugată deoarece adresa de pickup nu a putut fi geocodată"
+            )
+
+        order_to_add.pickup_lat = result["lat"]
+        order_to_add.pickup_lon = result["lon"]
+
+    if order_to_add.delivery_lat is None or order_to_add.delivery_lon is None:
+        result = geocode(order_to_add.address_delivery)
+
+        if not result:
+            raise ValueError(
+                "Comanda nu poate fi adăugată deoarece adresa de livrare nu a putut fi geocodată"
+            )
+
+        order_to_add.delivery_lat = result["lat"]
+        order_to_add.delivery_lon = result["lon"]
+
+    vehicle = trip.vehicle
+
+    if float(order_to_add.kg) > float(vehicle.capacity_kg):
+        raise ValueError(
+            f"Comanda nu poate fi adăugată: greutatea comenzii "
+            f"({float(order_to_add.kg):.2f} kg) depășește capacitatea vehiculului "
+            f"({float(vehicle.capacity_kg):.2f} kg)"
+        )
+
+    if float(order_to_add.m3) > float(vehicle.capacity_m3):
+        raise ValueError(
+            f"Comanda nu poate fi adăugată: volumul comenzii "
+            f"({float(order_to_add.m3):.2f} m³) depășește capacitatea vehiculului "
+            f"({float(vehicle.capacity_m3):.2f} m³)"
+        )
+
+    updated_orders = existing_orders + [order_to_add]
+
+    try:
+        reoptimization_result = _reoptimize_trip_with_orders(
+            db=db,
+            trip=trip,
+            orders=updated_orders,
+        )
+
+    except ValueError as e:
+        raise ValueError(
+            "Comanda nu poate fi adăugată în acest trip. "
+            f"Motiv: {str(e)}"
+        )
+
+    try:
+        _check_driver_trip_overlap(
+            db=db,
+            trip=trip,
+            new_driver_id=trip.driver_id,
+            company_id=company_id,
+        )
+
+    except ValueError as e:
+        raise ValueError(
+            "Comanda nu poate fi adăugată în acest trip. "
+            f"Motiv: {str(e)}"
+        )
+
+    order_to_add.status = OrderStatusEnum.PLANNED
+    order_to_add.assigned_delivery_date = trip.planned_date
+
+    db.commit()
+    db.refresh(trip)
+
+    return {
+        "trip_id": str(trip.id),
+        "added_order_id": str(order_to_add.id),
+        "added_order_ref": order_to_add.order_ref,
+        "added_order_status": order_to_add.status.value,
+        "new_planned_km": float(trip.planned_km),
+        "new_planned_duration_min": trip.planned_duration_min,
+        "total_orders_in_trip": len(updated_orders),
+        "total_stops": reoptimization_result["num_stops"],
+        "stops": reoptimization_result["stops"],
+        "message": (
+            "Comanda a fost adăugată în trip, a fost marcată ca PLANNED, "
+            "iar ruta a fost reoptimizată cu succes."
+        ),
+    }
+
+
 def run_planning(
     db: Session,
     company_id: uuid.UUID,

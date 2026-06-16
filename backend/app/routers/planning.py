@@ -7,7 +7,13 @@ import uuid
 from app.database import get_db
 from app.models.user import User
 from app.dependencies import require_roles
-from app.services.planning_service import run_planning, change_trip_driver, change_trip_vehicle
+from app.services.planning_service import (
+    run_planning,
+    change_trip_driver,
+    change_trip_vehicle,
+    remove_order_from_trip,
+    add_order_to_trip,
+)
 from app.schemas.planning import (
     EligibleOrdersRequest,
     EligibleOrderSummary,
@@ -15,6 +21,7 @@ from app.schemas.planning import (
     GeneratePlanRequest,
     ChangeDriverRequest,
     ChangeVehicleRequest,
+    AddOrderToTripRequest,
 )
 from app.models.order import Order, OrderStatusEnum
 from app.models.planning_session import PlanningStrategyEnum, PlanningSession, PlanningStatusEnum
@@ -406,6 +413,7 @@ def change_driver_on_trip(
         )
         return result
     except ValueError as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -438,6 +446,80 @@ def change_vehicle_on_trip(
         )
         return result
     except ValueError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.delete("/trips/{trip_id}/orders/{order_id}", status_code=status.HTTP_200_OK)
+def remove_order_from_trip_endpoint(
+    trip_id: uuid.UUID,
+    order_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("DISPECER", "MANAGER")),
+):
+    """
+    Scoate o comandă dintr-un trip PROPOSED și reoptimizează ruta rămasă.
+
+    Efecte:
+    - comanda scoasă revine în PENDING;
+    - assigned_delivery_date devine NULL;
+    - stopurile trip-ului sunt regenerate;
+    - planned_km și planned_duration_min sunt recalculate;
+    - ETA-urile sunt recalculate;
+    - dacă trip-ul rămâne fără comenzi, trip-ul este șters.
+    """
+    try:
+        result = remove_order_from_trip(
+            db=db,
+            trip_id=trip_id,
+            order_id=order_id,
+            company_id=current_user.company_id,
+        )
+        return result
+
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.post("/trips/{trip_id}/orders", status_code=status.HTTP_200_OK)
+def add_order_to_trip_endpoint(
+    trip_id: uuid.UUID,
+    body: AddOrderToTripRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("DISPECER", "MANAGER")),
+):
+    """
+    Adaugă o comandă PENDING într-un trip PROPOSED și reoptimizează ruta.
+
+    Validări:
+    - Trip-ul este PROPOSED
+    - PlanningSession este PROPOSED
+    - Comanda este PENDING
+    - Comanda nu este problematică
+    - Comanda nu este deja în trip
+    - Comanda este eligibilă pentru data trip-ului
+    - Ruta cu noua comandă este fezabilă pentru același vehicul și șofer
+
+    Dacă vreo validare eșuează, operația este refuzată și nu se modifică nimic.
+    """
+    try:
+        result = add_order_to_trip(
+            db=db,
+            trip_id=trip_id,
+            order_id=body.order_id,
+            company_id=current_user.company_id,
+        )
+        return result
+
+    except ValueError as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
