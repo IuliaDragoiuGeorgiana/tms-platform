@@ -187,6 +187,8 @@ def arrive_at_stop(
     """
     from app.models.driver import Driver
     driver = db.query(Driver).filter(Driver.user_id == current_user.id).first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Nu ai profil de șofer")
 
     trip = db.query(Trip).filter(
         Trip.id == trip_id,
@@ -289,6 +291,8 @@ def fail_stop(
     """
     from app.models.driver import Driver
     driver = db.query(Driver).filter(Driver.user_id == current_user.id).first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Nu ai profil de șofer")
 
     trip = db.query(Trip).filter(
         Trip.id == trip_id,
@@ -362,6 +366,8 @@ def complete_trip(
     """
     from app.models.driver import Driver
     driver = db.query(Driver).filter(Driver.user_id == current_user.id).first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Nu ai profil de șofer")
 
     trip = db.query(Trip).filter(
         Trip.id == trip_id,
