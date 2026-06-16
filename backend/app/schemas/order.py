@@ -111,6 +111,70 @@ class MarkOrderProblematicRequest(BaseModel):
     """Motivul pentru care o comandă este marcată ca problematică."""
     problem_reason: str
 
+class UpdateOrderRequest(BaseModel):
+    address_pickup: str | None = None
+    pickup_time_window_start: time | None = None
+    pickup_time_window_end: time | None = None
+    address_delivery: str | None = None
+    delivery_time_window_start: time | None = None
+    delivery_time_window_end: time | None = None
+    kg: float | None = None
+    m3: float | None = None
+    type_marfa: str | None = None
+    priority: str | None = None
+    delivery_deadline: date | None = None
+    earliest_delivery_date: date | None = None
+    special_instructions: str | None = None
+
+    @field_validator("address_pickup", "address_delivery")
+    @classmethod
+    def non_empty_optional_address(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Adresele de pickup și delivery sunt obligatorii")
+
+        return value
+
+    @field_validator("kg", "m3")
+    @classmethod
+    def positive_optional_values(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
+            raise ValueError("Greutatea și volumul trebuie să fie valori pozitive")
+
+        return value
+
+    @field_validator("type_marfa")
+    @classmethod
+    def valid_optional_type_marfa(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+
+        allowed = {"STANDARD", "FRAGIL", "PERISABIL", "ADR"}
+        value = value.upper()
+
+        if value not in allowed:
+            raise ValueError("type_marfa trebuie să fie: STANDARD, FRAGIL, PERISABIL sau ADR")
+
+        return value
+
+    @field_validator("priority")
+    @classmethod
+    def valid_optional_priority(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+
+        allowed = {"NORMAL", "URGENT", "CRITIC"}
+        value = value.upper()
+
+        if value not in allowed:
+            raise ValueError("priority trebuie să fie: NORMAL, URGENT sau CRITIC")
+
+        return value
+
 class UpdateOrderServiceTimeRequest(BaseModel):
     """
     Permite Dispecerului/Managerului să ajusteze manual timpul de service

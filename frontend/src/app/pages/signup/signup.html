@@ -1,0 +1,120 @@
+<section class="signup-page">
+  <div class="signup-hero">
+    <div class="logo-card">
+      <div class="logo-mark">
+        <span>TMS</span>
+      </div>
+
+      <h1>{{ 'hero.title' | translate }}</h1>
+
+      <p>{{ 'hero.signup_text' | translate }}</p>
+
+      <div class="hero-stats">
+        <div>
+          <strong>{{ 'hero.stat_tracking_value' | translate }}</strong>
+          <span>{{ 'hero.stat_tracking_label' | translate }}</span>
+        </div>
+
+        <div>
+          <strong>{{ 'hero.stat_roles_value' | translate }}</strong>
+          <span>{{ 'hero.stat_roles_label' | translate }}</span>
+        </div>
+
+        <div>
+          <strong>{{ 'hero.stat_smart_value' | translate }}</strong>
+          <span>{{ 'hero.stat_smart_label' | translate }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="signup-form-side">
+    <div class="signup-card">
+      <div class="signup-header">
+        <span class="eyebrow">{{ 'signup.eyebrow' | translate }}</span>
+        <h2>{{ 'signup.title' | translate }}</h2>
+        <p>{{ 'signup.description' | translate }}</p>
+      </div>
+
+      <form [formGroup]="signupForm" (ngSubmit)="onSubmit()">
+        <div class="form-group">
+          <label for="full_name">{{ 'signup.full_name' | translate }}</label>
+          <input
+            id="full_name"
+            type="text"
+            formControlName="full_name"
+            [placeholder]="'signup.full_name_placeholder' | translate"
+          />
+
+          @if (signupForm.get('full_name')?.touched && signupForm.get('full_name')?.invalid) {
+          <small>{{ 'signup.full_name_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="email">{{ 'common.email' | translate }}</label>
+          <input id="email" type="email" formControlName="email" placeholder="john@example.com" />
+
+          @if (signupForm.get('email')?.touched && signupForm.get('email')?.invalid) {
+          <small>{{ 'signin.email_invalid' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="phone">{{ 'common.phone' | translate }}</label>
+          <input id="phone" type="text" formControlName="phone" placeholder="+40 700 000 000" />
+        </div>
+
+        <div class="form-group">
+          <label for="company_slug">{{ 'signup.company' | translate }}</label>
+          <select
+            id="company_slug"
+            formControlName="company_slug"
+            [disabled]="isLoadingCompanies"
+          >
+            <option value="">{{ 'signup.company_placeholder' | translate }}</option>
+            @for (company of companies; track company.slug) {
+            <option [value]="company.slug">{{ company.name }}</option>
+            }
+          </select>
+
+          @if (isLoadingCompanies) {
+          <small class="field-hint">{{ 'signup.loading_companies' | translate }}</small>
+          }
+
+          @if (companyOptionsError) {
+          <small>{{ companyOptionsError | translate }}</small>
+          }
+
+          @if (signupForm.get('company_slug')?.touched && signupForm.get('company_slug')?.invalid) {
+          <small>{{ 'signup.company_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="password">{{ 'common.password' | translate }}</label>
+          <input
+            id="password"
+            type="password"
+            formControlName="password"
+            [placeholder]="'signup.password_placeholder' | translate"
+          />
+
+          @if (signupForm.get('password')?.touched && signupForm.get('password')?.invalid) {
+          <small>{{ 'signup.password_invalid' | translate }}</small>
+          }
+        </div>
+
+        @if (successMessage) {
+        <div class="alert alert-success">{{ successMessage | translate }}</div>
+        } @if (errorMessage) {
+        <div class="alert alert-error">{{ errorMessage | translate }}</div>
+        }
+
+        <button type="submit" [disabled]="isLoading">
+          {{ (isLoading ? 'signup.loading' : 'signup.submit') | translate }}
+        </button>
+      </form>
+    </div>
+  </div>
+</section>

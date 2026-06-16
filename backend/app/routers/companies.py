@@ -5,7 +5,7 @@ import uuid
 
 from app.database import get_db
 from app.models.company import Company
-from app.models.user import User
+from app.models.user import User, RoleEnum
 from app.models.vehicle import Vehicle
 from app.models.order import Order
 from app.models.trip import Trip
@@ -13,6 +13,7 @@ from app.schemas.company import (
     CreateCompanyRequest,
     UpdateCompanyRequest,
     CompanyResponse,
+    PublicCompanyResponse,
     CompanyStatsResponse,
 )
 from app.dependencies import require_roles
@@ -74,6 +75,22 @@ def list_companies(
     query = query.order_by(Company.created_at.desc())
 
     return query.all()
+
+
+@router.get("/public/signup-options", response_model=list[PublicCompanyResponse])
+def list_signup_companies(
+    db: Session = Depends(get_db),
+):
+    """
+    Listează companiile active pentru formularul public de înregistrare client.
+    Expune doar numele și slug-ul necesar pentru signup.
+    """
+    return (
+        db.query(Company)
+        .filter(Company.is_active == True)
+        .order_by(Company.name.asc())
+        .all()
+    )
 
 
 @router.get("/{company_id}", response_model=CompanyResponse)
@@ -210,6 +227,40 @@ def get_company_stats(
     # Numără utilizatori
     total_users = db.query(func.count(User.id)).filter(User.company_id == company_id).scalar()
 
+    # Numără manageri
+    total_managers = (
+        db.query(func.count(User.id))
+        .filter(
+            User.company_id == company_id,
+            User.role == RoleEnum.MANAGER,
+        )
+        .scalar()
+    )
+    total_dispatchers = (
+        db.query(func.count(User.id))
+        .filter(
+            User.company_id == company_id,
+            User.role == RoleEnum.DISPECER,
+        )
+        .scalar()
+    )
+    total_drivers = (
+        db.query(func.count(User.id))
+        .filter(
+            User.company_id == company_id,
+            User.role == RoleEnum.SOFER,
+        )
+        .scalar()
+    )
+    total_clients = (
+        db.query(func.count(User.id))
+        .filter(
+            User.company_id == company_id,
+            User.role == RoleEnum.CLIENT,
+        )
+        .scalar()
+    )
+
     # Numără vehicule
     total_vehicles = db.query(func.count(Vehicle.id)).filter(Vehicle.company_id == company_id).scalar()
 
@@ -224,6 +275,10 @@ def get_company_stats(
         company_name=company.name,
         is_active=company.is_active,
         total_users=total_users,
+        total_managers=total_managers,
+        total_dispatchers=total_dispatchers,
+        total_drivers=total_drivers,
+        total_clients=total_clients,
         total_vehicles=total_vehicles,
         total_orders=total_orders,
         total_trips=total_trips,

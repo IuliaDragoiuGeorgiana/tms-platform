@@ -1,0 +1,65 @@
+<section class="dashboard-page">
+  <div class="dashboard-header">
+    <div>
+      <span class="eyebrow">{{ dashboard.eyebrow | translate }}</span>
+      <h1>{{ dashboard.title | translate }}</h1>
+      <p>{{ dashboard.description | translate }}</p>
+    </div>
+
+    <div class="status-pill">{{ roleLabel | translate }}</div>
+  </div>
+
+  <div class="action-strip">
+    @for (action of dashboard.actions; track action) {
+    <button type="button">{{ action | translate }}</button>
+    }
+  </div>
+
+  <div class="metric-grid">
+    @for (metric of dashboard.metrics; track metric.label) {
+    <article class="metric-card">
+      <span>{{ metric.label }}</span>
+      <strong>{{ metric.value }}</strong>
+      <small>{{ metric.trend }}</small>
+    </article>
+    }
+  </div>
+
+  <div class="dashboard-grid">
+    <section class="panel shipments-panel">
+      <div class="panel-header">
+        <h2>{{ dashboard.primaryPanelTitle | translate }}</h2>
+        <span>{{ dashboard.primaryPanelMeta | translate }}</span>
+      </div>
+
+      <div class="shipment-list">
+        @for (item of dashboard.items; track item.id) {
+        <article class="shipment-row">
+          <div>
+            <strong>{{ item.id }}</strong>
+            <span>{{ item.title }}</span>
+          </div>
+
+          <div class="shipment-meta">
+            <span>{{ item.status }}</span>
+            <small>{{ item.meta }}</small>
+          </div>
+        </article>
+        }
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>{{ dashboard.activityTitle | translate }}</h2>
+        <span>{{ dashboard.activityMeta | translate }}</span>
+      </div>
+
+      <ul class="activity-list">
+        @for (activity of dashboard.activities; track activity) {
+        <li>{{ activity }}</li>
+        }
+      </ul>
+    </section>
+  </div>
+</section>

@@ -34,8 +34,21 @@ class CompanyResponse(BaseModel):
     plan: str
     max_vehicles: int | None
     max_users: int | None
+    managers_count: int = 0
+    users_count: int = 0
+    dispatchers_count: int = 0
+    drivers_count: int = 0
+    clients_count: int = 0
+    vehicles_count: int = 0
     created_at: datetime
     updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PublicCompanyResponse(BaseModel):
+    name: str
+    slug: str
 
     model_config = {"from_attributes": True}
 
@@ -46,6 +59,10 @@ class CompanyStatsResponse(BaseModel):
     company_name: str
     is_active: bool
     total_users: int
+    total_managers: int
+    total_dispatchers: int
+    total_drivers: int
+    total_clients: int
     total_vehicles: int
     total_orders: int
     total_trips: int

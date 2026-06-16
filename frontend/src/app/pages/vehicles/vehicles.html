@@ -1,0 +1,385 @@
+<section class="vehicles-page">
+  <div class="vehicles-header">
+    <div>
+      <span class="eyebrow">{{ 'vehicles.eyebrow' | translate }}</span>
+      <h1>{{ 'vehicles.title' | translate }}</h1>
+      <p>{{ 'vehicles.description' | translate }}</p>
+    </div>
+
+    <button type="button" class="primary-action" (click)="openAddVehicle()">
+      {{ 'vehicles.add' | translate }}
+    </button>
+  </div>
+
+  @if (createVehicleSuccess) {
+  <div class="alert alert-success">{{ createVehicleSuccess | translate }}</div>
+  }
+
+  @if (updateVehicleSuccess) {
+  <div class="alert alert-success">{{ updateVehicleSuccess | translate }}</div>
+  }
+
+  @if (loadVehiclesError) {
+  <div class="alert alert-error">{{ loadVehiclesError | translate }}</div>
+  }
+
+  <div class="vehicles-toolbar">
+    <label class="search-field">
+      <span>{{ 'vehicles.search_label' | translate }}</span>
+      <input
+        type="search"
+        [value]="searchTerm"
+        [placeholder]="'vehicles.search_placeholder' | translate"
+        (input)="updateSearch($any($event.target).value)"
+      />
+    </label>
+
+    <label class="filter-toggle">
+      <input
+        type="checkbox"
+        [checked]="showOnlyAvailable"
+        (change)="updateAvailableFilter($any($event.target).checked)"
+      />
+      <span>{{ 'vehicles.show_only_available' | translate }}</span>
+    </label>
+  </div>
+
+  @if (isLoadingVehicles) {
+  <div class="loading-state">
+    <h2>{{ 'vehicles.loading' | translate }}</h2>
+  </div>
+  } @else {
+  <section class="vehicle-panel">
+    <div class="panel-header">
+      <h2>{{ 'vehicles.fleet' | translate }}</h2>
+      <span>{{ filteredVehicles.length }}</span>
+    </div>
+
+    <div class="vehicle-list">
+      @for (vehicle of filteredVehicles; track vehicle.id) {
+      <article class="vehicle-row">
+        <div class="vehicle-main">
+          <span class="vehicle-id">{{ vehicle.id }}</span>
+          <h3>{{ vehicle.plate }}</h3>
+          <p>
+            {{ vehicleTypeKey(vehicle.type) | translate }} ·
+            {{ fuelTypeKey(vehicle.fuel_type) | translate }}
+          </p>
+        </div>
+
+        <div class="vehicle-stats">
+          <div>
+            <span>{{ 'vehicles.capacity_kg' | translate }}</span>
+            <strong>{{ vehicle.capacity_kg }}</strong>
+          </div>
+          <div>
+            <span>{{ 'vehicles.capacity_m3' | translate }}</span>
+            <strong>{{ vehicle.capacity_m3 }}</strong>
+          </div>
+          <div>
+            <span>{{ 'vehicles.avg_consumption' | translate }}</span>
+            <strong>
+              {{
+                vehicle.avg_consumption === null
+                  ? ('vehicles.not_available' | translate)
+                  : vehicle.avg_consumption
+              }}
+            </strong>
+          </div>
+          <div>
+            <span>{{ 'vehicles.itp_expiry' | translate }}</span>
+            <strong>{{ vehicle.itp_expiry || ('vehicles.not_available' | translate) }}</strong>
+          </div>
+        </div>
+
+        <div class="vehicle-meta">
+          <span class="status-badge">{{ vehicleStatusKey(vehicle.status) | translate }}</span>
+          <button type="button" class="row-action" (click)="openEditVehicle(vehicle)">
+            {{ 'vehicles.action.edit' | translate }}
+          </button>
+        </div>
+      </article>
+      } @empty {
+      <div class="empty-state">
+        <p>{{ 'vehicles.empty' | translate }}</p>
+      </div>
+      }
+    </div>
+  </section>
+  }
+
+  @if (isAddVehicleOpen) {
+  <div class="modal-backdrop" (click)="closeAddVehicle()"></div>
+
+  <section
+    class="vehicle-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'vehicles.add_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'vehicles.add_title' | translate }}</h2>
+        <p>{{ 'vehicles.add_description' | translate }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'vehicles.cancel' | translate"
+        (click)="closeAddVehicle()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="vehicleForm" (ngSubmit)="createVehicle()">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="vehicle_plate">{{ 'vehicles.plate' | translate }}</label>
+          <input
+            id="vehicle_plate"
+            type="text"
+            formControlName="plate"
+            [placeholder]="'vehicles.plate_placeholder' | translate"
+          />
+
+          @if (vehicleForm.get('plate')?.touched && vehicleForm.get('plate')?.invalid) {
+          <small>{{ 'vehicles.plate_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="vehicle_type">{{ 'vehicles.type' | translate }}</label>
+          <select id="vehicle_type" formControlName="type">
+            <option value="VAN">{{ 'vehicles.type.van' | translate }}</option>
+            <option value="TRUCK">{{ 'vehicles.type.truck' | translate }}</option>
+            <option value="CAR">{{ 'vehicles.type.car' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="vehicle_capacity_kg">{{ 'vehicles.capacity_kg' | translate }}</label>
+          <input id="vehicle_capacity_kg" type="number" min="1" formControlName="capacity_kg" />
+
+          @if (
+            vehicleForm.get('capacity_kg')?.touched && vehicleForm.get('capacity_kg')?.invalid
+          ) {
+          <small>{{ 'vehicles.positive_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="vehicle_capacity_m3">{{ 'vehicles.capacity_m3' | translate }}</label>
+          <input
+            id="vehicle_capacity_m3"
+            type="number"
+            min="0.1"
+            step="0.1"
+            formControlName="capacity_m3"
+          />
+
+          @if (
+            vehicleForm.get('capacity_m3')?.touched && vehicleForm.get('capacity_m3')?.invalid
+          ) {
+          <small>{{ 'vehicles.positive_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="vehicle_fuel_type">{{ 'vehicles.fuel_type' | translate }}</label>
+          <select id="vehicle_fuel_type" formControlName="fuel_type">
+            <option value="DIESEL">{{ 'vehicles.fuel.diesel' | translate }}</option>
+            <option value="GASOLINE">{{ 'vehicles.fuel.gasoline' | translate }}</option>
+            <option value="ELECTRIC">{{ 'vehicles.fuel.electric' | translate }}</option>
+            <option value="HYBRID">{{ 'vehicles.fuel.hybrid' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="vehicle_avg_consumption">{{ 'vehicles.avg_consumption' | translate }}</label>
+          <input
+            id="vehicle_avg_consumption"
+            type="number"
+            min="0"
+            step="0.1"
+            formControlName="avg_consumption"
+          />
+
+          @if (
+            vehicleForm.get('avg_consumption')?.touched &&
+            vehicleForm.get('avg_consumption')?.invalid
+          ) {
+          <small>{{ 'vehicles.non_negative_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="vehicle_itp_expiry">{{ 'vehicles.itp_expiry' | translate }}</label>
+          <input id="vehicle_itp_expiry" type="date" formControlName="itp_expiry" />
+        </div>
+      </div>
+
+      @if (createVehicleError) {
+      <div class="alert alert-error">{{ createVehicleError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="secondary-action" (click)="closeAddVehicle()">
+          {{ 'vehicles.cancel' | translate }}
+        </button>
+        <button type="submit" class="primary-action" [disabled]="isCreatingVehicle">
+          {{ (isCreatingVehicle ? 'vehicles.creating' : 'vehicles.create_submit') | translate }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+
+  @if (selectedEditVehicle) {
+  <div class="modal-backdrop" (click)="closeEditVehicle()"></div>
+
+  <section
+    class="vehicle-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'vehicles.edit_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'vehicles.edit_title' | translate }}</h2>
+        <p>{{ 'vehicles.edit_description' | translate }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'vehicles.cancel' | translate"
+        (click)="closeEditVehicle()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="vehicleForm" (ngSubmit)="updateVehicle()">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="edit_vehicle_plate">{{ 'vehicles.plate' | translate }}</label>
+          <input
+            id="edit_vehicle_plate"
+            type="text"
+            formControlName="plate"
+            [placeholder]="'vehicles.plate_placeholder' | translate"
+          />
+
+          @if (vehicleForm.get('plate')?.touched && vehicleForm.get('plate')?.invalid) {
+          <small>{{ 'vehicles.plate_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="edit_vehicle_type">{{ 'vehicles.type' | translate }}</label>
+          <select id="edit_vehicle_type" formControlName="type">
+            <option value="VAN">{{ 'vehicles.type.van' | translate }}</option>
+            <option value="TRUCK">{{ 'vehicles.type.truck' | translate }}</option>
+            <option value="CAR">{{ 'vehicles.type.car' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_vehicle_status">{{ 'vehicles.status' | translate }}</label>
+          <select id="edit_vehicle_status" formControlName="status">
+            <option value="DISPONIBIL">{{ 'vehicles.status.disponibil' | translate }}</option>
+            <option value="AVARIAT">{{ 'vehicles.status.avariat' | translate }}</option>
+            <option value="SERVICE">{{ 'vehicles.status.service' | translate }}</option>
+            <option value="REZERVAT">{{ 'vehicles.status.rezervat' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_vehicle_capacity_kg">{{ 'vehicles.capacity_kg' | translate }}</label>
+          <input
+            id="edit_vehicle_capacity_kg"
+            type="number"
+            min="1"
+            formControlName="capacity_kg"
+          />
+
+          @if (
+            vehicleForm.get('capacity_kg')?.touched && vehicleForm.get('capacity_kg')?.invalid
+          ) {
+          <small>{{ 'vehicles.positive_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="edit_vehicle_capacity_m3">{{ 'vehicles.capacity_m3' | translate }}</label>
+          <input
+            id="edit_vehicle_capacity_m3"
+            type="number"
+            min="0.1"
+            step="0.1"
+            formControlName="capacity_m3"
+          />
+
+          @if (
+            vehicleForm.get('capacity_m3')?.touched && vehicleForm.get('capacity_m3')?.invalid
+          ) {
+          <small>{{ 'vehicles.positive_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="edit_vehicle_fuel_type">{{ 'vehicles.fuel_type' | translate }}</label>
+          <select id="edit_vehicle_fuel_type" formControlName="fuel_type">
+            <option value="DIESEL">{{ 'vehicles.fuel.diesel' | translate }}</option>
+            <option value="GASOLINE">{{ 'vehicles.fuel.gasoline' | translate }}</option>
+            <option value="ELECTRIC">{{ 'vehicles.fuel.electric' | translate }}</option>
+            <option value="HYBRID">{{ 'vehicles.fuel.hybrid' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_vehicle_avg_consumption">
+            {{ 'vehicles.avg_consumption' | translate }}
+          </label>
+          <input
+            id="edit_vehicle_avg_consumption"
+            type="number"
+            min="0"
+            step="0.1"
+            formControlName="avg_consumption"
+          />
+
+          @if (
+            vehicleForm.get('avg_consumption')?.touched &&
+            vehicleForm.get('avg_consumption')?.invalid
+          ) {
+          <small>{{ 'vehicles.non_negative_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="edit_vehicle_itp_expiry">{{ 'vehicles.itp_expiry' | translate }}</label>
+          <input id="edit_vehicle_itp_expiry" type="date" formControlName="itp_expiry" />
+        </div>
+      </div>
+
+      @if (updateVehicleError) {
+      <div class="alert alert-error">{{ updateVehicleError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="secondary-action" (click)="closeEditVehicle()">
+          {{ 'vehicles.cancel' | translate }}
+        </button>
+        <button type="submit" class="primary-action" [disabled]="isUpdatingVehicle">
+          {{ (isUpdatingVehicle ? 'vehicles.updating' : 'vehicles.update_submit') | translate }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+</section>

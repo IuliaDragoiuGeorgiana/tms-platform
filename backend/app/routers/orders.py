@@ -12,6 +12,7 @@ from app.models.user import User
 from app.schemas.order import (
     CreateOrderRequest,
     OrderResponse,
+    UpdateOrderRequest,
     MarkOrderProblematicRequest,
     OrderFeasibilityResponse,
     UpdateOrderServiceTimeRequest,
@@ -29,7 +30,7 @@ def generate_tracking_token() -> str:
     return secrets.token_urlsafe(16)
 
 
-def check_order_feasibility(order: Order, db: Session) -> list[str]:
+def check_order_planning_feasibility(order: Order, db: Session) -> list[str]:
     """
     Verifică operațional dacă o comandă este pregătită pentru planning.
     Returnează o listă de warnings/probleme.
@@ -281,6 +282,104 @@ def list_orders(
     return query.all()
 
 
+@router.patch("/{order_id}", response_model=OrderResponse)
+def update_order(
+    order_id: uuid.UUID,
+    data: UpdateOrderRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("DISPECER", "MANAGER")),
+):
+    """
+    Permite managerului sau dispecerului să editeze o comandă PENDING din compania sa.
+    """
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.company_id == current_user.company_id,
+    ).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comanda nu a fost găsită",
+        )
+
+    if order.status != OrderStatusEnum.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Poți edita doar comenzile aflate în status PENDING",
+        )
+
+    update_data = data.model_dump(exclude_unset=True)
+    pickup_address_changed = (
+        "address_pickup" in update_data
+        and update_data["address_pickup"] != order.address_pickup
+    )
+    delivery_address_changed = (
+        "address_delivery" in update_data
+        and update_data["address_delivery"] != order.address_delivery
+    )
+
+    if "delivery_deadline" in update_data:
+        if update_data["delivery_deadline"] < date.today():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="delivery_deadline nu poate fi în trecut",
+            )
+
+    for field, value in update_data.items():
+        if field == "type_marfa" and value is not None:
+            setattr(order, field, MarfaTypeEnum(value))
+        elif field == "priority" and value is not None:
+            setattr(order, field, PriorityEnum(value))
+        else:
+            setattr(order, field, value)
+
+    if pickup_address_changed:
+        order.pickup_lat = None
+        order.pickup_lon = None
+
+    if delivery_address_changed:
+        order.delivery_lat = None
+        order.delivery_lon = None
+
+    if order.earliest_delivery_date and order.earliest_delivery_date > order.delivery_deadline:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="earliest_delivery_date nu poate fi după delivery_deadline",
+        )
+
+    if (
+        order.pickup_time_window_start
+        and order.pickup_time_window_end
+        and order.pickup_time_window_start >= order.pickup_time_window_end
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Fereastra orară de pickup este invalidă",
+        )
+
+    if (
+        order.delivery_time_window_start
+        and order.delivery_time_window_end
+        and order.delivery_time_window_start >= order.delivery_time_window_end
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Fereastra orară de delivery este invalidă",
+        )
+
+    order.flexibility_days = 0
+    if order.earliest_delivery_date:
+        delta = order.delivery_deadline - order.earliest_delivery_date
+        order.flexibility_days = max(0, delta.days)
+
+    ensure_order_service_times(db, order)
+    db.commit()
+    db.refresh(order)
+
+    return order
+
+
 @router.get("/track/{tracking_token}", response_model=dict)
 def track_order(
     tracking_token: str,
@@ -430,7 +529,7 @@ def mark_order_problematic(
     return order
 
 @router.get("/{order_id}/operational-warnings", response_model=OrderFeasibilityResponse)
-def check_order_feasibility(
+def get_order_operational_warnings(
     order_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("DISPECER", "MANAGER")),
@@ -564,7 +663,7 @@ def check_order_feasibility_endpoint(
             detail="Comanda nu a fost găsită",
         )
 
-    warnings = check_order_feasibility(order, db)
+    warnings = check_order_planning_feasibility(order, db)
 
     return OrderFeasibilityResponse(
         is_feasible=len(warnings) == 0,

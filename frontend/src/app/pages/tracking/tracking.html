@@ -1,0 +1,66 @@
+<section class="tracking-page">
+  <div class="tracking-header">
+    <span class="eyebrow">{{ 'tracking.eyebrow' | translate }}</span>
+    <h1>{{ 'tracking.title' | translate }}</h1>
+    <p>{{ 'tracking.description' | translate }}</p>
+  </div>
+
+  <section class="tracking-panel">
+    <form [formGroup]="trackingForm" (ngSubmit)="trackOrder()">
+      <div class="form-group">
+        <label for="tracking_token">{{ 'tracking.token' | translate }}</label>
+        <input
+          id="tracking_token"
+          type="text"
+          formControlName="token"
+          [placeholder]="'tracking.token_placeholder' | translate"
+        />
+
+        @if (trackingForm.get('token')?.touched && trackingForm.get('token')?.invalid) {
+        <small>{{ 'tracking.token_required' | translate }}</small>
+        }
+      </div>
+
+      @if (errorMessage) {
+      <div class="alert alert-error">{{ errorMessage | translate }}</div>
+      }
+
+      <button type="submit" class="primary-action" [disabled]="isLoading">
+        {{ (isLoading ? 'tracking.loading' : 'tracking.submit') | translate }}
+      </button>
+    </form>
+
+    @if (trackingResult) {
+    <div class="tracking-result">
+      <h2>{{ 'tracking.result_title' | translate }}</h2>
+
+      <dl>
+        <div>
+          <dt>{{ 'tracking.order_ref' | translate }}</dt>
+          <dd>{{ trackingResult.order_ref }}</dd>
+        </div>
+
+        <div>
+          <dt>{{ 'tracking.status' | translate }}</dt>
+          <dd><span class="status-badge">{{ statusKey(trackingResult.status) | translate }}</span></dd>
+        </div>
+
+        <div>
+          <dt>{{ 'tracking.delivery_deadline' | translate }}</dt>
+          <dd>{{ trackingResult.delivery_deadline }}</dd>
+        </div>
+
+        <div>
+          <dt>{{ 'tracking.pickup' | translate }}</dt>
+          <dd>{{ trackingResult.address_pickup }}</dd>
+        </div>
+
+        <div>
+          <dt>{{ 'tracking.delivery' | translate }}</dt>
+          <dd>{{ trackingResult.address_delivery }}</dd>
+        </div>
+      </dl>
+    </div>
+    }
+  </section>
+</section>

@@ -49,5 +49,9 @@ class User(UUIDPrimaryKey, FullTimestampMixin, Base):
     cascade="all, delete-orphan",
     )
 
+    @property
+    def company_name(self) -> str | None:
+        return self.company.name if self.company else None
+
     def __repr__(self) -> str:
         return f"<User {self.email} ({self.role.value})>"

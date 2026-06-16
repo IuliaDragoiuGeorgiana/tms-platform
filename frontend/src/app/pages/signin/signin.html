@@ -1,0 +1,78 @@
+<section class="signin-page">
+  <div class="signin-hero">
+    <div class="logo-card">
+      <div class="logo-mark">
+        <span>TMS</span>
+      </div>
+
+      <h1>{{ 'hero.title' | translate }}</h1>
+
+      <p>{{ 'hero.signin_text' | translate }}</p>
+
+      <div class="hero-stats">
+        <div>
+          <strong>{{ 'hero.stat_live_value' | translate }}</strong>
+          <span>{{ 'hero.stat_live_label' | translate }}</span>
+        </div>
+
+        <div>
+          <strong>{{ 'hero.stat_role_based_value' | translate }}</strong>
+          <span>{{ 'hero.stat_role_based_label' | translate }}</span>
+        </div>
+
+        <div>
+          <strong>{{ 'hero.stat_secure_value' | translate }}</strong>
+          <span>{{ 'hero.stat_secure_label' | translate }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="signin-form-side">
+    <div class="signin-card">
+      <div class="signin-header">
+        <span class="eyebrow">{{ 'signin.eyebrow' | translate }}</span>
+        <h2>{{ 'signin.title' | translate }}</h2>
+        <p>{{ 'signin.description' | translate }}</p>
+      </div>
+
+      <form [formGroup]="signinForm" (ngSubmit)="onSubmit()">
+        <div class="form-group">
+          <label for="email">{{ 'common.email' | translate }}</label>
+          <input id="email" type="email" formControlName="email" placeholder="john@example.com" />
+
+          @if (signinForm.get('email')?.touched && signinForm.get('email')?.invalid) {
+          <small>{{ 'signin.email_invalid' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="password">{{ 'common.password' | translate }}</label>
+          <input
+            id="password"
+            type="password"
+            formControlName="password"
+            [placeholder]="'signin.password_placeholder' | translate"
+          />
+
+          @if (signinForm.get('password')?.touched && signinForm.get('password')?.invalid) {
+          <small>{{ 'signin.password_required' | translate }}</small>
+          }
+        </div>
+
+        @if (errorMessage) {
+        <div class="alert alert-error">{{ errorMessage | translate }}</div>
+        }
+
+        <button type="submit" [disabled]="isLoading">
+          {{ (isLoading ? 'signin.loading' : 'signin.submit') | translate }}
+        </button>
+
+        <p class="signup-link">
+          {{ 'signin.need_account' | translate }}
+          <a routerLink="/signup">{{ 'signin.create_account' | translate }}</a>
+        </p>
+      </form>
+    </div>
+  </div>
+</section>

@@ -24,12 +24,14 @@ class TokenResponse(BaseModel):
 class UserResponse(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID | None = None
+    company_name: str | None = None
     email: str
     full_name: str
     role: str
     is_active: bool
     is_approved: bool
     must_change_password: bool
+    phone: str | None = None
 
     model_config = {"from_attributes": True}
 

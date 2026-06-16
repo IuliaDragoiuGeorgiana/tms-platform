@@ -274,25 +274,42 @@ def deactivate_user(
 
     return user
 
-@router.get("/clients", response_model=list[UserResponse])
-def list_company_clients(
+@router.get("/users/employees", response_model=list[UserResponse])
+def list_company_employees(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("MANAGER", "DISPECER")),
+    current_user: User = Depends(require_roles("MANAGER")),
 ):
     """
-    Listează clienții activi și aprobați din compania curentă.
-    Util pentru Dispecer/Manager când creează o comandă în numele unui client.
+    Listează dispecerii și șoferii din compania managerului curent.
     """
-    clients = (
+    employees = (
         db.query(User)
         .filter(
             User.company_id == current_user.company_id,
-            User.role == RoleEnum.CLIENT,
-            User.is_active == True,
-            User.is_approved == True,
+            User.role.in_([RoleEnum.DISPECER, RoleEnum.SOFER]),
         )
         .order_by(User.full_name.asc())
         .all()
     )
 
-    return clients
+    return employees
+
+@router.get("/clients", response_model=list[UserResponse])
+def list_company_clients(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("SUPER_ADMIN", "MANAGER", "DISPECER")),
+):
+    """
+    Listează clienții.
+    SUPER_ADMIN vede toți clienții, iar MANAGER/DISPECER doar clienții companiei curente.
+    """
+    query = db.query(User).filter(
+        User.role == RoleEnum.CLIENT,
+    )
+
+    current_role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+
+    if current_role != "SUPER_ADMIN":
+        query = query.filter(User.company_id == current_user.company_id)
+
+    return query.order_by(User.full_name.asc()).all()

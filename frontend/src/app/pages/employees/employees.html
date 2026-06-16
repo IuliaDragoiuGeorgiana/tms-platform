@@ -1,0 +1,297 @@
+<section class="employees-page">
+  <div class="employees-header">
+    <div>
+      <span class="eyebrow">{{ 'employees.eyebrow' | translate }}</span>
+      <h1>{{ 'employees.title' | translate }}</h1>
+      <p>{{ 'employees.description' | translate }}</p>
+    </div>
+
+    <button type="button" class="primary-action" (click)="openInviteEmployee()">
+      {{ 'employees.invite' | translate }}
+    </button>
+  </div>
+
+  @if (inviteEmployeeSuccess) {
+  <div class="alert alert-success">{{ inviteEmployeeSuccess | translate }}</div>
+  }
+
+  @if (statusSuccess) {
+  <div class="alert alert-success">{{ statusSuccess | translate }}</div>
+  }
+
+  @if (statusError) {
+  <div class="alert alert-error">{{ statusError | translate }}</div>
+  }
+
+  @if (loadEmployeesError) {
+  <div class="alert alert-error">{{ loadEmployeesError | translate }}</div>
+  }
+
+  <div class="employees-toolbar">
+    <label class="search-field">
+      <span>{{ 'employees.search_label' | translate }}</span>
+      <input
+        type="search"
+        [value]="searchTerm"
+        [placeholder]="'employees.search_placeholder' | translate"
+        (input)="updateSearch($any($event.target).value)"
+      />
+    </label>
+
+    <label class="filter-toggle">
+      <input
+        type="checkbox"
+        [checked]="showOnlyActive"
+        (change)="updateActiveFilter($any($event.target).checked)"
+      />
+      <span>{{ 'employees.show_only_active' | translate }}</span>
+    </label>
+  </div>
+
+  @if (isLoadingEmployees) {
+  <div class="loading-state">
+    <h2>{{ 'employees.loading' | translate }}</h2>
+  </div>
+  } @else {
+  <div class="employee-sections">
+    <section class="employee-panel">
+      <div class="panel-header">
+        <h2>{{ 'employees.dispatchers' | translate }}</h2>
+        <span>{{ filteredDispatchers.length }}</span>
+      </div>
+
+      <div class="employee-list">
+        @for (employee of filteredDispatchers; track employee.id) {
+        <article class="employee-row">
+          <div>
+            <span class="employee-id">{{ employee.id }}</span>
+            <h3>{{ employee.name }}</h3>
+            <p>{{ employee.email }}</p>
+          </div>
+
+          <div class="employee-meta">
+            <span class="status-badge">{{ employee.statusKey | translate }}</span>
+            <small>{{ employee.phone }}</small>
+            <button type="button" class="row-action" (click)="openToggleEmployee(employee)">
+              {{
+                (employee.isActive ? 'employees.action.deactivate' : 'employees.action.activate')
+                  | translate
+              }}
+            </button>
+          </div>
+        </article>
+        } @empty {
+        <div class="empty-state">
+          <p>{{ 'employees.empty_dispatchers' | translate }}</p>
+        </div>
+        }
+      </div>
+    </section>
+
+    <section class="employee-panel">
+      <div class="panel-header">
+        <h2>{{ 'employees.drivers' | translate }}</h2>
+        <span>{{ filteredDrivers.length }}</span>
+      </div>
+
+      <div class="employee-list">
+        @for (employee of filteredDrivers; track employee.id) {
+        <article class="employee-row">
+          <div>
+            <span class="employee-id">{{ employee.id }}</span>
+            <h3>{{ employee.name }}</h3>
+            <p>{{ employee.email }}</p>
+          </div>
+
+          <div class="employee-meta">
+            <span class="status-badge">{{ employee.statusKey | translate }}</span>
+            <small>{{ employee.phone }}</small>
+            <button type="button" class="row-action" (click)="openToggleEmployee(employee)">
+              {{
+                (employee.isActive ? 'employees.action.deactivate' : 'employees.action.activate')
+                  | translate
+              }}
+            </button>
+          </div>
+        </article>
+        } @empty {
+        <div class="empty-state">
+          <p>{{ 'employees.empty_drivers' | translate }}</p>
+        </div>
+        }
+      </div>
+    </section>
+  </div>
+  }
+
+  @if (isInviteEmployeeOpen) {
+  <div class="modal-backdrop" (click)="closeInviteEmployee()"></div>
+
+  <section
+    class="employee-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'employees.invite_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'employees.invite_title' | translate }}</h2>
+        <p>{{ 'employees.invite_description' | translate }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'employees.cancel' | translate"
+        (click)="closeInviteEmployee()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="inviteEmployeeForm" (ngSubmit)="inviteEmployee()">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="employee_full_name">{{ 'employees.full_name' | translate }}</label>
+          <input
+            id="employee_full_name"
+            type="text"
+            formControlName="full_name"
+            [placeholder]="'employees.full_name_placeholder' | translate"
+          />
+
+          @if (
+            inviteEmployeeForm.get('full_name')?.touched &&
+            inviteEmployeeForm.get('full_name')?.invalid
+          ) {
+          <small>{{ 'employees.full_name_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="employee_email">{{ 'common.email' | translate }}</label>
+          <input
+            id="employee_email"
+            type="email"
+            formControlName="email"
+            placeholder="employee@example.com"
+          />
+
+          @if (
+            inviteEmployeeForm.get('email')?.touched && inviteEmployeeForm.get('email')?.invalid
+          ) {
+          <small>{{ 'signin.email_invalid' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="employee_phone">{{ 'common.phone' | translate }}</label>
+          <input
+            id="employee_phone"
+            type="text"
+            formControlName="phone"
+            placeholder="+40 700 000 000"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="employee_role">{{ 'employees.role' | translate }}</label>
+          <select id="employee_role" formControlName="role">
+            <option value="DISPECER">{{ 'employees.role.dispatcher' | translate }}</option>
+            <option value="SOFER">{{ 'employees.role.driver' | translate }}</option>
+          </select>
+        </div>
+      </div>
+
+      @if (inviteEmployeeError) {
+      <div class="alert alert-error">{{ inviteEmployeeError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="secondary-action" (click)="closeInviteEmployee()">
+          {{ 'employees.cancel' | translate }}
+        </button>
+        <button type="submit" class="primary-action" [disabled]="isInvitingEmployee">
+          {{ (isInvitingEmployee ? 'employees.inviting' : 'employees.invite_submit') | translate }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+
+  @if (employeeToToggle) {
+  <div class="modal-backdrop" (click)="closeToggleEmployee()"></div>
+
+  <section
+    class="confirm-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="
+      (employeeToToggle.isActive
+        ? 'employees.confirm_deactivate_title'
+        : 'employees.confirm_activate_title'
+      ) | translate
+    "
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>
+          {{
+            (employeeToToggle.isActive
+              ? 'employees.confirm_deactivate_title'
+              : 'employees.confirm_activate_title'
+            ) | translate
+          }}
+        </h2>
+        <p>
+          {{
+            (employeeToToggle.isActive
+              ? 'employees.confirm_deactivate_description'
+              : 'employees.confirm_activate_description'
+            ) | translate
+          }}
+          <strong>{{ employeeToToggle.name }}</strong>
+        </p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'employees.cancel' | translate"
+        (click)="closeToggleEmployee()"
+        [disabled]="isTogglingEmployee"
+      >
+        X
+      </button>
+    </div>
+
+    <div class="form-actions">
+      <button
+        type="button"
+        class="secondary-action"
+        (click)="closeToggleEmployee()"
+        [disabled]="isTogglingEmployee"
+      >
+        {{ 'employees.cancel' | translate }}
+      </button>
+      <button
+        type="button"
+        class="danger-action"
+        (click)="confirmToggleEmployee()"
+        [disabled]="isTogglingEmployee"
+      >
+        {{
+          (isTogglingEmployee
+            ? 'employees.status_updating'
+            : employeeToToggle.isActive
+              ? 'employees.confirm_deactivate'
+              : 'employees.confirm_activate'
+          ) | translate
+        }}
+      </button>
+    </div>
+  </section>
+  }
+</section>

@@ -1,16 +1,26 @@
+from app.routers import (
+    admin,
+    auth,
+    companies,
+    drivers,
+    orders,
+    planning,
+    system_config,
+    trips,
+    vehicles,
+)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, admin, companies, vehicles, drivers, orders, planning, trips, system_config
 
 app = FastAPI(
     title="TMS Platform",
     description="Transportation Management System - Disertatie SIA 2025",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:4200"],
+    allow_origins=["http://localhost:4200", "http://127.0.0.1:4200"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,9 +36,11 @@ app.include_router(planning.router)
 app.include_router(trips.router)
 app.include_router(system_config.router)
 
+
 @app.get("/")
 def root():
     return {"message": "TMS Platform API is running"}
+
 
 @app.get("/health")
 def health():

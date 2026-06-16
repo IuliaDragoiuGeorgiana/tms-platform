@@ -1,0 +1,444 @@
+<section class="drivers-page">
+  <div class="drivers-header">
+    <div>
+      <span class="eyebrow">{{ 'drivers.eyebrow' | translate }}</span>
+      <h1>{{ 'drivers.title' | translate }}</h1>
+      <p>{{ 'drivers.description' | translate }}</p>
+    </div>
+
+    <button type="button" class="primary-action" (click)="openAddDriver()">
+      {{ 'drivers.add' | translate }}
+    </button>
+  </div>
+
+  @if (createDriverSuccess) {
+  <div class="alert alert-success">{{ createDriverSuccess | translate }}</div>
+  }
+
+  @if (updateDriverSuccess) {
+  <div class="alert alert-success">{{ updateDriverSuccess | translate }}</div>
+  }
+
+  @if (loadDriversError) {
+  <div class="alert alert-error">{{ loadDriversError | translate }}</div>
+  }
+
+  @if (isLoadingDrivers) {
+  <div class="loading-state">
+    <h2>{{ 'drivers.loading' | translate }}</h2>
+  </div>
+  } @else {
+  <div class="driver-grid">
+    @for (driver of drivers; track driver.id) {
+    <article class="driver-card">
+      <div class="driver-card__header">
+        <div>
+          <span class="driver-id">{{ driver.id }}</span>
+          <h2>{{ driver.name || driver.userId }}</h2>
+        </div>
+
+        <span class="status-badge">{{ driver.statusKey | translate }}</span>
+      </div>
+
+      <dl class="driver-details">
+        <div>
+          <dt>{{ 'drivers.user_id' | translate }}</dt>
+          <dd>{{ driver.userId }}</dd>
+        </div>
+
+        @if (driver.vehicleId) {
+        <div>
+          <dt>{{ 'drivers.vehicle_id' | translate }}</dt>
+          <dd>{{ driver.vehiclePlate || driver.vehicleId }}</dd>
+        </div>
+        }
+
+        @if (driver.email) {
+        <div>
+          <dt>{{ 'common.email' | translate }}</dt>
+          <dd>{{ driver.email }}</dd>
+        </div>
+        }
+
+        @if (driver.phone) {
+        <div>
+          <dt>{{ 'drivers.phone' | translate }}</dt>
+          <dd>{{ driver.phone }}</dd>
+        </div>
+        }
+
+        @if (driver.license) {
+        <div>
+          <dt>{{ 'drivers.license' | translate }}</dt>
+          <dd>{{ driver.license }}</dd>
+        </div>
+        }
+
+        @if (driver.activeTrip) {
+        <div>
+          <dt>{{ 'drivers.active_trip' | translate }}</dt>
+          <dd>{{ driver.activeTrip }}</dd>
+        </div>
+        }
+
+        @if (driver.shiftStart || driver.shiftEnd) {
+        <div>
+          <dt>{{ 'drivers.shift' | translate }}</dt>
+          <dd>{{ driver.shiftStart || '-' }} - {{ driver.shiftEnd || '-' }}</dd>
+        </div>
+        }
+
+        @if (driver.maxHoursDay) {
+        <div>
+          <dt>{{ 'drivers.max_hours_day' | translate }}</dt>
+          <dd>{{ driver.maxHoursDay }}</dd>
+        </div>
+        }
+
+        @if (driver.hoursDrivenToday !== undefined) {
+        <div>
+          <dt>{{ 'drivers.hours_driven_today' | translate }}</dt>
+          <dd>{{ driver.hoursDrivenToday }}</dd>
+        </div>
+        }
+      </dl>
+
+      <div class="driver-actions">
+        <button type="button" (click)="openEditDriver(driver)">
+          {{ 'drivers.action.edit' | translate }}
+        </button>
+        <button type="button">{{ 'drivers.action.assign_trip' | translate }}</button>
+      </div>
+    </article>
+    } @empty {
+    <div class="empty-state">
+      <p>{{ 'drivers.empty' | translate }}</p>
+    </div>
+    }
+  </div>
+  }
+
+  @if (isAddDriverOpen) {
+  <div class="modal-backdrop" (click)="closeAddDriver()"></div>
+
+  <section
+    class="driver-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'drivers.create_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="panel-header">
+      <div>
+        <h2>{{ 'drivers.create_title' | translate }}</h2>
+        <p>{{ 'drivers.create_description' | translate }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'drivers.cancel' | translate"
+        (click)="closeAddDriver()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="driverForm" (ngSubmit)="createDriver()">
+      <div class="form-grid">
+        <div class="form-group selector-group">
+          <label for="driver_user_search">{{ 'drivers.select_driver' | translate }}</label>
+          <input
+            id="driver_user_search"
+            type="search"
+            [value]="driverSearchTerm"
+            [placeholder]="'drivers.driver_search_placeholder' | translate"
+            (input)="updateDriverSearch($any($event.target).value)"
+          />
+
+          @if (selectedDriver) {
+          <div class="selected-option">
+            <strong>{{ selectedDriver.full_name }}</strong>
+            <span>{{ selectedDriver.email }}</span>
+          </div>
+          }
+
+          <div class="option-list">
+            @if (isLoadingDriverOptions) {
+            <div class="option-empty">{{ 'drivers.loading_options' | translate }}</div>
+            } @else {
+              @for (driver of filteredSelectableDrivers; track driver.id) {
+              <button
+                type="button"
+                class="option-item"
+                [class.selected]="driverForm.get('user_id')?.value === driver.id"
+                (click)="selectDriver(driver)"
+              >
+                <span>
+                  <strong>{{ driver.full_name }}</strong>
+                  <small>{{ driver.email }}</small>
+                </span>
+                <small>{{ driver.phone || ('vehicles.not_available' | translate) }}</small>
+              </button>
+              } @empty {
+              <div class="option-empty">{{ 'drivers.no_selectable_drivers' | translate }}</div>
+              }
+            }
+          </div>
+
+          @if (driverForm.get('user_id')?.touched && driverForm.get('user_id')?.invalid) {
+          <small>{{ 'drivers.user_id_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group selector-group">
+          <label for="driver_vehicle_search">{{ 'drivers.select_vehicle' | translate }}</label>
+          <input
+            id="driver_vehicle_search"
+            type="search"
+            [value]="vehicleSearchTerm"
+            [placeholder]="'drivers.vehicle_search_placeholder' | translate"
+            (input)="updateVehicleSearch($any($event.target).value)"
+          />
+
+          @if (selectedVehicle) {
+          <div class="selected-option">
+            <strong>{{ selectedVehicle.plate }}</strong>
+            <span>
+              {{ vehicleTypeKey(selectedVehicle.type) | translate }} ·
+              {{ vehicleStatusKey(selectedVehicle.status) | translate }}
+            </span>
+            <button type="button" class="clear-selection" (click)="clearVehicleSelection()">
+              {{ 'drivers.clear_vehicle' | translate }}
+            </button>
+          </div>
+          }
+
+          <div class="option-list">
+            @if (isLoadingDriverOptions) {
+            <div class="option-empty">{{ 'drivers.loading_options' | translate }}</div>
+            } @else {
+              @for (vehicle of filteredSelectableVehicles; track vehicle.id) {
+              <button
+                type="button"
+                class="option-item"
+                [class.selected]="driverForm.get('vehicle_id')?.value === vehicle.id"
+                (click)="selectVehicle(vehicle)"
+              >
+                <span>
+                  <strong>{{ vehicle.plate }}</strong>
+                  <small>
+                    {{ vehicleTypeKey(vehicle.type) | translate }} ·
+                    {{ fuelTypeKey(vehicle.fuel_type) | translate }}
+                  </small>
+                </span>
+                <small>{{ vehicleStatusKey(vehicle.status) | translate }}</small>
+              </button>
+              } @empty {
+              <div class="option-empty">{{ 'drivers.no_selectable_vehicles' | translate }}</div>
+              }
+            }
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="driver_shift_start">{{ 'drivers.shift_start' | translate }}</label>
+          <input id="driver_shift_start" type="time" formControlName="shift_start" />
+        </div>
+
+        <div class="form-group">
+          <label for="driver_shift_end">{{ 'drivers.shift_end' | translate }}</label>
+          <input id="driver_shift_end" type="time" formControlName="shift_end" />
+        </div>
+
+        <div class="form-group">
+          <label for="driver_max_hours_day">{{ 'drivers.max_hours_day' | translate }}</label>
+          <input
+            id="driver_max_hours_day"
+            type="number"
+            min="1"
+            step="0.5"
+            formControlName="max_hours_day"
+          />
+
+          @if (
+            driverForm.get('max_hours_day')?.touched && driverForm.get('max_hours_day')?.invalid
+          ) {
+          <small>{{ 'drivers.positive_number' | translate }}</small>
+          }
+        </div>
+      </div>
+
+      @if (driverOptionsError) {
+      <div class="alert alert-error">{{ driverOptionsError | translate }}</div>
+      }
+
+      @if (createDriverError) {
+      <div class="alert alert-error">{{ createDriverError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="secondary-action" (click)="closeAddDriver()">
+          {{ 'drivers.cancel' | translate }}
+        </button>
+        <button
+          type="submit"
+          class="primary-action"
+          [disabled]="isCreatingDriver || isLoadingDriverOptions"
+        >
+          {{ (isCreatingDriver ? 'drivers.creating' : 'drivers.create') | translate }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+
+  @if (selectedEditDriver) {
+  <div class="modal-backdrop" (click)="closeEditDriver()"></div>
+
+  <section
+    class="driver-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'drivers.edit_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="panel-header">
+      <div>
+        <h2>{{ 'drivers.edit_title' | translate }}</h2>
+        <p>{{ 'drivers.edit_description' | translate }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'drivers.cancel' | translate"
+        (click)="closeEditDriver()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="editDriverForm" (ngSubmit)="updateDriver()">
+      <div class="form-grid">
+        <div class="form-group form-group-wide readonly-group">
+          <span>{{ 'drivers.driver' | translate }}</span>
+          <strong>{{ selectedEditDriver.name || selectedEditDriver.userId }}</strong>
+          @if (selectedEditDriver.email) {
+          <small>{{ selectedEditDriver.email }}</small>
+          }
+        </div>
+
+        <div class="form-group form-group-wide selector-group">
+          <label for="edit_driver_vehicle_search">{{ 'drivers.select_vehicle' | translate }}</label>
+          <input
+            id="edit_driver_vehicle_search"
+            type="search"
+            [value]="editVehicleSearchTerm"
+            [placeholder]="'drivers.vehicle_search_placeholder' | translate"
+            (input)="updateEditVehicleSearch($any($event.target).value)"
+          />
+
+          @if (selectedEditVehicle) {
+          <div class="selected-option">
+            <strong>{{ selectedEditVehicle.plate }}</strong>
+            <span>
+              {{ vehicleTypeKey(selectedEditVehicle.type) | translate }} ·
+              {{ vehicleStatusKey(selectedEditVehicle.status) | translate }}
+            </span>
+            <button type="button" class="clear-selection" (click)="clearEditVehicleSelection()">
+              {{ 'drivers.clear_vehicle' | translate }}
+            </button>
+          </div>
+          }
+
+          <div class="option-list">
+            @if (isLoadingEditVehicles) {
+            <div class="option-empty">{{ 'drivers.loading_options' | translate }}</div>
+            } @else {
+              @for (vehicle of filteredEditSelectableVehicles; track vehicle.id) {
+              <button
+                type="button"
+                class="option-item"
+                [class.selected]="editDriverForm.get('vehicle_id')?.value === vehicle.id"
+                (click)="selectEditVehicle(vehicle)"
+              >
+                <span>
+                  <strong>{{ vehicle.plate }}</strong>
+                  <small>
+                    {{ vehicleTypeKey(vehicle.type) | translate }} ·
+                    {{ fuelTypeKey(vehicle.fuel_type) | translate }}
+                  </small>
+                </span>
+                <small>{{ vehicleStatusKey(vehicle.status) | translate }}</small>
+              </button>
+              } @empty {
+              <div class="option-empty">{{ 'drivers.no_selectable_vehicles' | translate }}</div>
+              }
+            }
+          </div>
+        </div>
+
+        <div class="form-group form-group-wide">
+          <label for="edit_driver_status">{{ 'drivers.status' | translate }}</label>
+          <select id="edit_driver_status" formControlName="status">
+            <option value="AVAILABLE">{{ 'drivers.status.available' | translate }}</option>
+            <option value="ON_TRIP">{{ 'drivers.status.on_trip' | translate }}</option>
+            <option value="OFF_DUTY">{{ 'drivers.status.off_duty' | translate }}</option>
+            <option value="BREAK">{{ 'drivers.status.break' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_driver_shift_start">{{ 'drivers.shift_start' | translate }}</label>
+          <input id="edit_driver_shift_start" type="time" formControlName="shift_start" />
+        </div>
+
+        <div class="form-group">
+          <label for="edit_driver_shift_end">{{ 'drivers.shift_end' | translate }}</label>
+          <input id="edit_driver_shift_end" type="time" formControlName="shift_end" />
+        </div>
+
+        <div class="form-group form-group-wide">
+          <label for="edit_driver_max_hours_day">{{ 'drivers.max_hours_day' | translate }}</label>
+          <input
+            id="edit_driver_max_hours_day"
+            type="number"
+            min="1"
+            step="0.5"
+            formControlName="max_hours_day"
+          />
+
+          @if (
+            editDriverForm.get('max_hours_day')?.touched &&
+            editDriverForm.get('max_hours_day')?.invalid
+          ) {
+          <small>{{ 'drivers.positive_number' | translate }}</small>
+          }
+        </div>
+      </div>
+
+      @if (editDriverOptionsError) {
+      <div class="alert alert-error">{{ editDriverOptionsError | translate }}</div>
+      }
+
+      @if (updateDriverError) {
+      <div class="alert alert-error">{{ updateDriverError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="secondary-action" (click)="closeEditDriver()">
+          {{ 'drivers.cancel' | translate }}
+        </button>
+        <button
+          type="submit"
+          class="primary-action"
+          [disabled]="isUpdatingDriver || isLoadingEditVehicles"
+        >
+          {{ (isUpdatingDriver ? 'drivers.updating' : 'drivers.update') | translate }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+</section>

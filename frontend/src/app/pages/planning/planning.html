@@ -1,0 +1,378 @@
+<section class="planning-page">
+  <div class="planning-header">
+    <div>
+      <span class="eyebrow">{{ 'planning.eyebrow' | translate }}</span>
+      <h1>{{ 'planning.title' | translate }}</h1>
+      <p>{{ 'planning.description' | translate }}</p>
+    </div>
+  </div>
+
+  <div class="planning-metrics">
+    @for (card of cards; track card.title) {
+    <article class="planning-card">
+      <span>{{ card.title | translate }}</span>
+      <strong>{{ card.value }}</strong>
+      <p>{{ card.detail | translate }}</p>
+    </article>
+    }
+  </div>
+
+  <div class="planning-layout">
+    <section class="planning-panel">
+      <div class="panel-header">
+        <div>
+          <h2>{{ 'planning.queue_title' | translate }}</h2>
+          <p>{{ 'planning.queue_description' | translate }}</p>
+        </div>
+        <span>{{ planningQueue.length }}</span>
+      </div>
+
+      <div class="planning-queue-controls">
+        <label>
+          <span>{{ 'planning.date_start' | translate }}</span>
+          <input
+            type="date"
+            [min]="today"
+            [value]="dateStart"
+            (input)="updateDateStart($any($event.target).value)"
+          />
+        </label>
+
+        <label>
+          <span>{{ 'planning.date_end' | translate }}</span>
+          <input
+            type="date"
+            [min]="dateStart || today"
+            [value]="dateEnd"
+            (input)="updateDateEnd($any($event.target).value)"
+          />
+        </label>
+
+        <button type="button" [disabled]="isLoadingEligibleOrders" (click)="applyPlanningInterval()">
+          {{ 'planning.apply_interval' | translate }}
+        </button>
+
+        <button type="button" [disabled]="isComparingStrategies" (click)="compareStrategies()">
+          {{
+            (isComparingStrategies
+              ? 'planning.action.comparing_strategies'
+              : 'planning.action.compare_strategies'
+            ) | translate
+          }}
+        </button>
+      </div>
+
+      @if (eligibleOrdersError) {
+      <div class="alert alert-error">{{ eligibleOrdersError | translate }}</div>
+      }
+      @if (compareStrategiesError) {
+      <div class="alert alert-error">{{ compareStrategiesError | translate }}</div>
+      }
+      @if (planGenerationSuccess) {
+      <div class="alert" style="background: rgba(22, 163, 74, 0.1); color: var(--color-success);">{{ planGenerationSuccess | translate }}</div>
+      }
+
+      @if (isLoadingEligibleOrders) {
+      <div class="loading-state">
+        <h2>{{ 'planning.loading_eligible_orders' | translate }}</h2>
+      </div>
+      } @else {
+      <div class="planning-list">
+        @for (order of planningQueue; track order.id) {
+        <article class="planning-row">
+          <div>
+            <span>{{ order.order_ref }}</span>
+            <h3>{{ order.address_pickup }} -> {{ order.address_delivery }}</h3>
+            <p>
+              {{ 'orders.client' | translate }}:
+              {{ order.client_name || ('vehicles.not_available' | translate) }}
+            </p>
+          </div>
+          <div class="planning-row-meta">
+            <strong>{{ getPriorityKey(order.priority) | translate }}</strong>
+            <span>{{ getCargoTypeKey(order.type_marfa) | translate }}</span>
+            <span>{{ order.delivery_deadline }}</span>
+            <span>{{ order.kg }} kg / {{ order.m3 }} m3</span>
+          </div>
+        </article>
+        } @empty {
+        <div class="empty-state">
+          <p>{{ 'planning.empty_eligible_orders' | translate }}</p>
+        </div>
+        }
+      </div>
+      }
+    </section>
+
+    <aside class="planning-panel">
+      <div class="panel-header">
+        <div>
+          <h2>{{ 'planning.trips_title' | translate }}</h2>
+          <p>{{ 'planning.trips_description' | translate }}</p>
+        </div>
+        <span>{{ proposedTrips.length }}</span>
+      </div>
+
+      @if (proposedTripsError) {
+      <div class="alert alert-error">{{ proposedTripsError | translate }}</div>
+      }
+      @if (approveTripError) {
+      <div class="alert alert-error">{{ approveTripError | translate }}</div>
+      }
+      @if (approveTripSuccess) {
+      <div class="alert" style="background: rgba(22, 163, 74, 0.1); color: var(--color-success);">{{ approveTripSuccess | translate }}</div>
+      }
+      @if (isLoadingProposedTrips) {
+      <div class="loading-state">
+        <h2>{{ 'planning.loading_trips' | translate }}</h2>
+      </div>
+      } @else {
+      <div class="planning-list">
+        @for (trip of proposedTrips; track trip.id) {
+        <article class="planning-row">
+          <div>
+            <span>{{ trip.status }}</span>
+            <h3>{{ 'planning.trip_date' | translate }}: {{ trip.planned_date }}</h3>
+            <p>{{ 'planning.trip_id' | translate }}: {{ trip.id }}</p>
+          </div>
+          <div class="planning-row-meta">
+            <strong>{{ trip.planned_km ?? 0 }} km</strong>
+            <span>{{ trip.planned_duration_min ?? 0 }} {{ 'planning.minutes_short' | translate }}</span>
+            <span>{{ 'planning.driver' | translate }}: {{ getDriverLabel(trip.driver_id) | translate }}</span>
+            <span>{{ 'planning.vehicle' | translate }}: {{ getVehicleLabel(trip.vehicle_id) | translate }}</span>
+            <button
+              type="button"
+              style="justify-self: end; margin-top: 8px; border: 1px solid var(--color-primary); border-radius: 8px; padding: 8px 10px; background: var(--color-primary); color: white; cursor: pointer; font-weight: 800;"
+              [disabled]="approvingTripId === trip.id"
+              [style.opacity]="approvingTripId === trip.id ? '0.6' : '1'"
+              [style.cursor]="approvingTripId === trip.id ? 'not-allowed' : 'pointer'"
+              (click)="approveTrip(trip)"
+            >
+              {{
+                approvingTripId === trip.id
+                  ? ('planning.approving_trip' | translate)
+                  : ('planning.approve_trip' | translate)
+              }}
+            </button>
+            <button
+              type="button"
+              style="justify-self: end; border: 1px solid var(--color-border); border-radius: 8px; padding: 8px 10px; background: var(--color-surface); color: var(--color-text); cursor: pointer; font-weight: 800;"
+              (click)="openEditTrip(trip)"
+            >
+              {{ 'planning.edit_trip' | translate }}
+            </button>
+          </div>
+        </article>
+        } @empty {
+        <div class="empty-state">
+          <p>{{ 'planning.empty_trips' | translate }}</p>
+        </div>
+        }
+      </div>
+      }
+    </aside>
+  </div>
+
+  @if (selectedEditTrip; as trip) {
+  <div
+    class="modal-backdrop"
+    style="position: fixed; inset: 0; z-index: 1000; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(6px);"
+    (click)="closeEditTrip()"
+  ></div>
+
+  <section
+    class="strategy-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'planning.edit_trip_title' | translate"
+    style="position: fixed; inset: 8vh 18vw auto; z-index: 1001; max-height: 84vh; overflow: auto; padding: 22px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="panel-header">
+      <div>
+        <h2>{{ 'planning.edit_trip_title' | translate }}</h2>
+        <p>{{ 'planning.trip_id' | translate }}: {{ trip.id }}</p>
+      </div>
+      <button type="button" class="planning-action-primary" style="border: 1px solid var(--color-border); border-radius: 8px; padding: 10px 12px; cursor: pointer;" (click)="closeEditTrip()">
+        {{ 'orders.close' | translate }}
+      </button>
+    </div>
+
+    @if (editTripError) {
+    <div class="alert alert-error">{{ editTripError | translate }}</div>
+    }
+    @if (editTripSuccess) {
+    <div class="alert" style="background: rgba(22, 163, 74, 0.1); color: var(--color-success);">{{ editTripSuccess | translate }}</div>
+    }
+
+    <div style="display: grid; gap: 14px;">
+      <section style="display: grid; gap: 12px; padding: 14px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background);">
+        <strong>{{ 'planning.trip_assignments' | translate }}</strong>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;">
+          <label style="display: grid; gap: 6px; color: var(--color-text-muted); font-size: 13px; font-weight: 800;">
+            {{ 'planning.driver' | translate }}
+            <select
+              style="min-height: 40px; border: 1px solid var(--color-border); border-radius: 8px; padding: 0 10px; background: var(--color-surface); color: var(--color-text);"
+              [value]="editTripDriverId"
+              (change)="updateEditTripDriver($any($event.target).value)"
+            >
+              @for (driver of driverOptions; track driver.value) {
+              <option [value]="driver.value">{{ driver.label }}</option>
+              } @empty {
+              <option value="">{{ 'vehicles.not_available' | translate }}</option>
+              }
+            </select>
+          </label>
+          <label style="display: grid; gap: 6px; color: var(--color-text-muted); font-size: 13px; font-weight: 800;">
+            {{ 'planning.vehicle' | translate }}
+            <select
+              style="min-height: 40px; border: 1px solid var(--color-border); border-radius: 8px; padding: 0 10px; background: var(--color-surface); color: var(--color-text);"
+              [value]="editTripVehicleId"
+              (change)="updateEditTripVehicle($any($event.target).value)"
+            >
+              @for (vehicle of vehicleOptions; track vehicle.value) {
+              <option [value]="vehicle.value">{{ vehicle.label }}</option>
+              } @empty {
+              <option value="">{{ 'vehicles.not_available' | translate }}</option>
+              }
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section style="display: grid; gap: 12px; padding: 14px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background);">
+        <div>
+          <strong>{{ 'planning.trip_orders' | translate }}</strong>
+          <p style="margin: 6px 0 0; color: var(--color-text-muted);">{{ 'planning.trip_orders_edit_unavailable' | translate }}</p>
+        </div>
+        @if (isLoadingTripStops) {
+        <div class="loading-state">
+          <h2>{{ 'planning.loading_trip_orders' | translate }}</h2>
+        </div>
+        } @else {
+        <div style="display: grid; gap: 8px;">
+          @for (stop of selectedEditTripStops; track stop.id) {
+          <div style="display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface);">
+            <strong>#{{ stop.sequence }}</strong>
+            <span>{{ stop.order_id }}</span>
+            <span>{{ stop.stop_type }} / {{ stop.status }}</span>
+          </div>
+          } @empty {
+          <p style="margin: 0; color: var(--color-text-muted);">{{ 'planning.empty_trip_orders' | translate }}</p>
+          }
+        </div>
+        }
+      </section>
+
+      <button
+        type="button"
+        style="justify-self: start; border: 1px solid var(--color-primary); border-radius: 8px; padding: 10px 13px; background: var(--color-primary); color: white; cursor: pointer; font-weight: 900;"
+        [disabled]="!hasTripEditChanges() || isSavingTripEdits"
+        [style.opacity]="!hasTripEditChanges() || isSavingTripEdits ? '0.55' : '1'"
+        [style.cursor]="!hasTripEditChanges() || isSavingTripEdits ? 'not-allowed' : 'pointer'"
+        (click)="saveTripEdits()"
+      >
+        {{
+          isSavingTripEdits
+            ? ('planning.saving_trip' | translate)
+            : ('planning.save_trip' | translate)
+        }}
+      </button>
+    </div>
+  </section>
+  }
+
+  @if (strategyComparison) {
+  <div
+    class="modal-backdrop"
+    style="position: fixed; inset: 0; z-index: 1000; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(6px);"
+    (click)="closeStrategyComparison()"
+  ></div>
+
+  <section
+    class="strategy-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'planning.compare.title' | translate"
+    style="position: fixed; inset: 6vh 5vw auto; z-index: 1001; max-height: 88vh; overflow: auto; padding: 22px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="panel-header">
+      <div>
+        <h2>{{ 'planning.compare.title' | translate }}</h2>
+        <p>{{ strategyComparison.date_start }} - {{ strategyComparison.date_end }}</p>
+      </div>
+      <button type="button" class="planning-action-primary" style="border: 1px solid var(--color-border); border-radius: 8px; padding: 10px 12px; cursor: pointer;" (click)="closeStrategyComparison()">
+        {{ 'orders.close' | translate }}
+      </button>
+    </div>
+
+    <p style="margin: 0 0 16px; color: var(--color-text-muted); font-weight: 700;">
+      {{ 'planning.compare.select_to_generate' | translate }}
+    </p>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px;">
+      @for (variant of strategyComparison.variants; track variant.strategy; let index = $index) {
+      <button
+        type="button"
+        class="strategy-option-card"
+        style="display: grid; gap: 12px; align-content: start; min-height: 360px; padding: 16px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background); color: var(--color-text); cursor: pointer; text-align: left;"
+        [disabled]="!canGeneratePlan(variant)"
+        [attr.aria-label]="('planning.compare.generate_this_strategy' | translate) + ': ' + (getStrategyKey(variant.strategy) | translate)"
+        [style.opacity]="canGeneratePlan(variant) ? '1' : '0.62'"
+        [style.cursor]="canGeneratePlan(variant) ? 'pointer' : 'not-allowed'"
+        (click)="generatePlan(variant)"
+      >
+        <strong style="font-size: 18px; color: var(--color-text);">
+          {{ getStrategyKey(variant.strategy) | translate }}
+        </strong>
+
+        @if (variant.error) {
+        <span style="color: var(--color-danger); font-weight: 700;">{{ variant.error }}</span>
+        } @else {
+        @if (getStrategyWarnings(variant).length) {
+        <span style="display: block; padding: 10px; border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; background: rgba(245, 158, 11, 0.14); color: #92400e; font-weight: 800;">
+          {{ 'planning.compare.warnings' | translate }}: {{ getStrategyWarnings(variant).length }}
+        </span>
+        }
+
+        <span style="display: grid; gap: 8px;">
+          <span style="display: flex; justify-content: space-between; gap: 10px;">
+            <span style="color: var(--color-text-muted);">{{ 'planning.compare.planned' | translate }}</span>
+            <strong>{{ variant.total_planned ?? 0 }} / {{ variant.total_orders ?? 0 }}</strong>
+          </span>
+          <span style="display: flex; justify-content: space-between; gap: 10px;">
+            <span style="color: var(--color-text-muted);">{{ 'planning.compare.trips' | translate }}</span>
+            <strong>{{ variant.total_trips ?? 0 }}</strong>
+          </span>
+          <span style="display: flex; justify-content: space-between; gap: 10px;">
+            <span style="color: var(--color-text-muted);">{{ 'planning.compare.distance' | translate }}</span>
+            <strong>{{ variant.total_km ?? 0 }} km</strong>
+          </span>
+        </span>
+
+        @if (hasTrips(variant)) {
+        <span style="display: grid; gap: 10px;">
+          @for (trip of variant.trips; track trip.vehicle_plate + '-' + trip.driver + '-' + $index; let tripIndex = $index) {
+          <span style="display: grid; gap: 5px; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface);">
+            <strong>{{ 'planning.compare.trip' | translate }} {{ tripIndex + 1 }}</strong>
+            <span style="color: var(--color-text-muted);">{{ 'planning.compare.driver' | translate }}: {{ trip.driver_name || trip.driver || ('vehicles.not_available' | translate) }}</span>
+            <span style="color: var(--color-text-muted);">{{ 'planning.compare.vehicle' | translate }}: {{ trip.vehicle_plate || ('vehicles.not_available' | translate) }}</span>
+            <span style="color: var(--color-text-muted);">{{ 'planning.compare.included_orders' | translate }}: {{ getTripOrders(trip).join(', ') || ('planning.compare.no_orders' | translate) }}</span>
+          </span>
+          }
+        </span>
+        } @else {
+        <span style="color: var(--color-text-muted);">{{ 'planning.compare.no_trips' | translate }}</span>
+        }
+        }
+      </button>
+      }
+    </div>
+
+    @if (compareStrategiesError) {
+    <div class="alert alert-error" style="margin-top: 16px;">{{ compareStrategiesError | translate }}</div>
+    }
+  </section>
+  }
+</section>

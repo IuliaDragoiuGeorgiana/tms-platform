@@ -3,6 +3,7 @@ from sqlalchemy import String, Boolean, Integer, Enum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, UUIDPrimaryKey, FullTimestampMixin
+from app.models.user import RoleEnum
 
 
 class PlanEnum(str, enum.Enum):
@@ -29,6 +30,30 @@ class Company(UUIDPrimaryKey, FullTimestampMixin, Base):
     orders = relationship("Order", back_populates="company", lazy="selectin")
     planning_sessions = relationship("PlanningSession", back_populates="company", lazy="selectin")
     trips = relationship("Trip", back_populates="company", lazy="selectin")
+
+    @property
+    def managers_count(self) -> int:
+        return sum(1 for user in self.users if user.role == RoleEnum.MANAGER)
+
+    @property
+    def users_count(self) -> int:
+        return len(self.users)
+
+    @property
+    def dispatchers_count(self) -> int:
+        return sum(1 for user in self.users if user.role == RoleEnum.DISPECER)
+
+    @property
+    def drivers_count(self) -> int:
+        return sum(1 for user in self.users if user.role == RoleEnum.SOFER)
+
+    @property
+    def clients_count(self) -> int:
+        return sum(1 for user in self.users if user.role == RoleEnum.CLIENT)
+
+    @property
+    def vehicles_count(self) -> int:
+        return len(self.vehicles)
 
     def __repr__(self) -> str:
         return f"<Company {self.name} ({self.slug})>"

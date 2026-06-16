@@ -1,0 +1,580 @@
+<section class="companies-page">
+  <div class="companies-header">
+    <div>
+      <span class="eyebrow">{{ 'companies.eyebrow' | translate }}</span>
+      <h1>{{ 'companies.title' | translate }}</h1>
+      <p>{{ 'companies.description' | translate }}</p>
+    </div>
+
+    <button type="button" class="primary-action" (click)="openAddCompany()">
+      {{ 'companies.add' | translate }}
+    </button>
+  </div>
+
+  @if (createCompanySuccess) {
+  <div class="alert alert-success">{{ createCompanySuccess | translate }}</div>
+  } @if (companyActionSuccess) {
+  <div class="alert alert-success">{{ companyActionSuccess | translate }}</div>
+  } @if (inviteManagerSuccess) {
+  <div class="alert alert-success">{{ inviteManagerSuccess | translate }}</div>
+  } @if (loadCompaniesError) {
+  <div class="alert alert-error">{{ loadCompaniesError | translate }}</div>
+  } @if (companyActionError) {
+  <div class="alert alert-error">{{ companyActionError | translate }}</div>
+  }
+
+  <div class="companies-toolbar">
+    <label class="search-field">
+      <span>{{ 'companies.search_label' | translate }}</span>
+      <input
+        type="search"
+        [value]="searchTerm"
+        [placeholder]="'companies.search_placeholder' | translate"
+        (input)="updateSearch($any($event.target).value)"
+      />
+    </label>
+
+    <div class="result-count">
+      {{ 'companies.results' | translate }}: {{ filteredCompanies.length }}
+    </div>
+  </div>
+
+  @if (isLoadingCompanies) {
+  <div class="empty-state">
+    <h2>{{ 'companies.loading' | translate }}</h2>
+  </div>
+  } @else {
+  <div class="companies-list">
+    @for (company of filteredCompanies; track company.id) {
+    <article class="company-card">
+      <div class="company-card__main">
+        <div>
+          <span class="company-id">{{ company.id }}</span>
+          <h2>{{ company.name }}</h2>
+          <div class="company-meta-line">
+            <span>{{ 'companies.slug' | translate }}: {{ company.slug }}</span>
+            <span>{{ 'companies.plan' | translate }}: {{ company.plan }}</span>
+            @if (company.vatId) {
+            <span>{{ 'companies.vat_id' | translate }}: {{ company.vatId }}</span>
+            } @if (company.city || company.country) {
+            <span>{{ company.city }}, {{ company.country }}</span>
+            }
+          </div>
+        </div>
+
+        <span class="status-badge">{{ company.statusKey | translate }}</span>
+      </div>
+
+      <div class="company-summary">
+        <div>
+          <strong>{{ company.managers }}</strong>
+          <span>{{ 'companies.managers' | translate }}</span>
+        </div>
+        <div>
+          <strong>{{ company.dispatchers }}</strong>
+          <span>{{ 'companies.dispatchers' | translate }}</span>
+        </div>
+        <div>
+          <strong>{{ company.drivers }}</strong>
+          <span>{{ 'companies.drivers' | translate }}</span>
+        </div>
+        <div>
+          <strong>{{ company.clients }}</strong>
+          <span>{{ 'companies.clients' | translate }}</span>
+        </div>
+        <div>
+          <strong>{{ company.vehicles }}</strong>
+          <span>{{ 'companies.vehicles' | translate }}</span>
+        </div>
+        <div>
+          <strong>{{ company.ordersThisMonth }}</strong>
+          <span>{{ 'companies.orders_this_month' | translate }}</span>
+        </div>
+      </div>
+
+      <div class="company-actions">
+        <button type="button" (click)="openViewCompany(company)">
+          {{ 'companies.action.view' | translate }}
+        </button>
+        <button type="button" (click)="openEditCompany(company)">
+          {{ 'companies.action.edit' | translate }}
+        </button>
+        <button type="button" [disabled]="!company.isActive" (click)="openInviteManager(company)">
+          {{ 'companies.action.invite_manager' | translate }}
+        </button>
+        <button
+          type="button"
+          [disabled]="isTogglingCompany(company.id)"
+          (click)="toggleCompanyStatus(company)"
+        >
+          {{
+            (isTogglingCompany(company.id)
+              ? 'companies.action.updating_status'
+              : company.isActive
+                ? 'companies.action.deactivate'
+                : 'companies.action.activate'
+            ) | translate
+          }}
+        </button>
+      </div>
+    </article>
+    } @empty {
+    <div class="empty-state">
+      <h2>{{ 'companies.empty_title' | translate }}</h2>
+      <p>{{ 'companies.empty_description' | translate }}</p>
+    </div>
+    }
+  </div>
+  }
+
+  @if (isViewCompanyOpen && selectedViewCompany) {
+  <div class="modal-backdrop" (click)="closeViewCompany()"></div>
+
+  <section
+    class="company-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'companies.view_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="panel-header">
+      <div>
+        <h2>{{ 'companies.view_title' | translate }}</h2>
+        <p>{{ selectedViewCompany.name }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'companies.close' | translate"
+        (click)="closeViewCompany()"
+      >
+        X
+      </button>
+    </div>
+
+    <dl class="details-modal-list">
+      <div>
+        <dt>{{ 'companies.id' | translate }}</dt>
+        <dd>{{ selectedViewCompany.id }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.form.name' | translate }}</dt>
+        <dd>{{ selectedViewCompany.name }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.slug' | translate }}</dt>
+        <dd>{{ selectedViewCompany.slug }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.plan' | translate }}</dt>
+        <dd>{{ selectedViewCompany.plan }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.status' | translate }}</dt>
+        <dd>{{ selectedViewCompany.statusKey | translate }}</dd>
+      </div>
+
+      @if (selectedViewCompany.vatId) {
+      <div>
+        <dt>{{ 'companies.vat_id' | translate }}</dt>
+        <dd>{{ selectedViewCompany.vatId }}</dd>
+      </div>
+      }
+
+      @if (selectedViewCompany.city || selectedViewCompany.country) {
+      <div>
+        <dt>{{ 'companies.location' | translate }}</dt>
+        <dd>{{ selectedViewCompany.city }}, {{ selectedViewCompany.country }}</dd>
+      </div>
+      }
+
+      <div>
+        <dt>{{ 'companies.managers' | translate }}</dt>
+        <dd>{{ selectedViewCompany.managers }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.dispatchers' | translate }}</dt>
+        <dd>{{ selectedViewCompany.dispatchers }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.drivers' | translate }}</dt>
+        <dd>{{ selectedViewCompany.drivers }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.clients' | translate }}</dt>
+        <dd>{{ selectedViewCompany.clients }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.vehicles' | translate }}</dt>
+        <dd>{{ selectedViewCompany.vehicles }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.orders_this_month' | translate }}</dt>
+        <dd>{{ selectedViewCompany.ordersThisMonth }}</dd>
+      </div>
+    </dl>
+
+    <div class="modal-section-header">
+      <h3>{{ 'companies.stats_title' | translate }}</h3>
+    </div>
+
+    @if (isLoadingCompanyStats) {
+    <div class="empty-state compact-state">
+      <h2>{{ 'companies.stats_loading' | translate }}</h2>
+    </div>
+    } @else if (loadCompanyStatsError) {
+    <div class="alert alert-error">{{ loadCompanyStatsError | translate }}</div>
+    } @else if (selectedCompanyStats) {
+    <dl class="details-modal-list">
+      <div>
+        <dt>{{ 'companies.stats.total_managers' | translate }}</dt>
+        <dd>{{ selectedCompanyStats.total_managers }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.stats.total_dispatchers' | translate }}</dt>
+        <dd>{{ selectedCompanyStats.total_dispatchers }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.stats.total_drivers' | translate }}</dt>
+        <dd>{{ selectedCompanyStats.total_drivers }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.stats.total_clients' | translate }}</dt>
+        <dd>{{ selectedCompanyStats.total_clients }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.stats.total_vehicles' | translate }}</dt>
+        <dd>{{ selectedCompanyStats.total_vehicles }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.stats.total_orders' | translate }}</dt>
+        <dd>{{ selectedCompanyStats.total_orders }}</dd>
+      </div>
+
+      <div>
+        <dt>{{ 'companies.stats.total_trips' | translate }}</dt>
+        <dd>{{ selectedCompanyStats.total_trips }}</dd>
+      </div>
+    </dl>
+    }
+
+    <div class="form-actions">
+      <button type="button" class="primary-action" (click)="closeViewCompany()">
+        {{ 'companies.close' | translate }}
+      </button>
+    </div>
+  </section>
+  }
+
+  @if (isAddCompanyOpen) {
+  <div class="modal-backdrop" (click)="closeAddCompany()"></div>
+
+  <section
+    class="company-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'companies.create_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="panel-header">
+      <div>
+        <h2>{{ 'companies.create_title' | translate }}</h2>
+        <p>{{ 'companies.create_description' | translate }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'companies.cancel' | translate"
+        (click)="closeAddCompany()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="companyForm" (ngSubmit)="createCompany()">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="company_name">{{ 'companies.form.name' | translate }}</label>
+          <input
+            id="company_name"
+            type="text"
+            formControlName="name"
+            [placeholder]="'companies.form.name_placeholder' | translate"
+          />
+
+          @if (companyForm.get('name')?.touched && companyForm.get('name')?.invalid) {
+          <small>{{ 'companies.form.name_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="company_slug">{{ 'companies.slug' | translate }}</label>
+          <input
+            id="company_slug"
+            type="text"
+            formControlName="slug"
+            [placeholder]="'companies.form.slug_placeholder' | translate"
+          />
+
+          @if (companyForm.get('slug')?.touched && companyForm.get('slug')?.invalid) {
+          <small>{{ 'companies.form.slug_invalid' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="company_plan">{{ 'companies.plan' | translate }}</label>
+          <select id="company_plan" formControlName="plan">
+            <option value="FREE">{{ 'companies.plan.free' | translate }}</option>
+            <option value="BASIC">{{ 'companies.plan.basic' | translate }}</option>
+            <option value="PRO">{{ 'companies.plan.pro' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="max_vehicles">{{ 'companies.max_vehicles' | translate }}</label>
+          <input id="max_vehicles" type="number" min="1" formControlName="max_vehicles" />
+
+          @if (
+            companyForm.get('max_vehicles')?.touched && companyForm.get('max_vehicles')?.invalid
+          ) {
+          <small>{{ 'companies.form.positive_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="max_users">{{ 'companies.max_users' | translate }}</label>
+          <input id="max_users" type="number" min="1" formControlName="max_users" />
+
+          @if (companyForm.get('max_users')?.touched && companyForm.get('max_users')?.invalid) {
+          <small>{{ 'companies.form.positive_number' | translate }}</small>
+          }
+        </div>
+      </div>
+
+      @if (createCompanyError) {
+      <div class="alert alert-error">{{ createCompanyError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="secondary-action" (click)="closeAddCompany()">
+          {{ 'companies.cancel' | translate }}
+        </button>
+        <button type="submit" class="primary-action" [disabled]="isCreatingCompany">
+          {{ (isCreatingCompany ? 'companies.creating' : 'companies.create') | translate }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+
+  @if (isEditCompanyOpen) {
+  <div class="modal-backdrop" (click)="closeEditCompany()"></div>
+
+  <section
+    class="company-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'companies.edit_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="panel-header">
+      <div>
+        <h2>{{ 'companies.edit_title' | translate }}</h2>
+        <p>
+          {{ 'companies.edit_description' | translate }}
+          @if (selectedEditCompany) {
+          <strong>{{ selectedEditCompany.name }}</strong>
+          }
+        </p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'companies.cancel' | translate"
+        (click)="closeEditCompany()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="editCompanyForm" (ngSubmit)="updateCompany()">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="edit_company_name">{{ 'companies.form.name' | translate }}</label>
+          <input
+            id="edit_company_name"
+            type="text"
+            formControlName="name"
+            [placeholder]="'companies.form.name_placeholder' | translate"
+          />
+
+          @if (editCompanyForm.get('name')?.touched && editCompanyForm.get('name')?.invalid) {
+          <small>{{ 'companies.form.name_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="edit_company_plan">{{ 'companies.plan' | translate }}</label>
+          <select id="edit_company_plan" formControlName="plan">
+            <option value="FREE">{{ 'companies.plan.free' | translate }}</option>
+            <option value="BASIC">{{ 'companies.plan.basic' | translate }}</option>
+            <option value="PRO">{{ 'companies.plan.pro' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_max_vehicles">{{ 'companies.max_vehicles' | translate }}</label>
+          <input id="edit_max_vehicles" type="number" min="1" formControlName="max_vehicles" />
+
+          @if (
+            editCompanyForm.get('max_vehicles')?.touched &&
+            editCompanyForm.get('max_vehicles')?.invalid
+          ) {
+          <small>{{ 'companies.form.positive_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="edit_max_users">{{ 'companies.max_users' | translate }}</label>
+          <input id="edit_max_users" type="number" min="1" formControlName="max_users" />
+
+          @if (
+            editCompanyForm.get('max_users')?.touched &&
+            editCompanyForm.get('max_users')?.invalid
+          ) {
+          <small>{{ 'companies.form.positive_number' | translate }}</small>
+          }
+        </div>
+
+        <label class="checkbox-field">
+          <input type="checkbox" formControlName="is_active" />
+          <span>{{ 'companies.form.active' | translate }}</span>
+        </label>
+      </div>
+
+      @if (updateCompanyError) {
+      <div class="alert alert-error">{{ updateCompanyError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="secondary-action" (click)="closeEditCompany()">
+          {{ 'companies.cancel' | translate }}
+        </button>
+        <button type="submit" class="primary-action" [disabled]="isUpdatingCompany">
+          {{ (isUpdatingCompany ? 'companies.updating' : 'companies.update') | translate }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+
+  @if (isInviteManagerOpen) {
+  <div class="modal-backdrop" (click)="closeInviteManager()"></div>
+
+  <section
+    class="company-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'companies.invite_manager_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="panel-header">
+      <div>
+        <h2>{{ 'companies.invite_manager_title' | translate }}</h2>
+        <p>
+          {{ 'companies.invite_manager_description' | translate }}
+          @if (selectedInviteCompany) {
+          <strong>{{ selectedInviteCompany.name }}</strong>
+          }
+        </p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'companies.cancel' | translate"
+        (click)="closeInviteManager()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="inviteManagerForm" (ngSubmit)="inviteManager()">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="manager_full_name">{{ 'companies.invite.full_name' | translate }}</label>
+          <input
+            id="manager_full_name"
+            type="text"
+            formControlName="full_name"
+            [placeholder]="'companies.invite.full_name_placeholder' | translate"
+          />
+
+          @if (
+            inviteManagerForm.get('full_name')?.touched &&
+            inviteManagerForm.get('full_name')?.invalid
+          ) {
+          <small>{{ 'companies.invite.full_name_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="manager_email">{{ 'common.email' | translate }}</label>
+          <input
+            id="manager_email"
+            type="email"
+            formControlName="email"
+            placeholder="manager@example.com"
+          />
+
+          @if (
+            inviteManagerForm.get('email')?.touched && inviteManagerForm.get('email')?.invalid
+          ) {
+          <small>{{ 'signin.email_invalid' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="manager_phone">{{ 'common.phone' | translate }}</label>
+          <input
+            id="manager_phone"
+            type="text"
+            formControlName="phone"
+            placeholder="+40 700 000 000"
+          />
+        </div>
+      </div>
+
+      @if (inviteManagerError) {
+      <div class="alert alert-error">{{ inviteManagerError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="secondary-action" (click)="closeInviteManager()">
+          {{ 'companies.cancel' | translate }}
+        </button>
+        <button type="submit" class="primary-action" [disabled]="isInvitingManager">
+          {{ (isInvitingManager ? 'companies.inviting_manager' : 'companies.invite_manager') | translate }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+</section>

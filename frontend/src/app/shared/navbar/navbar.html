@@ -1,0 +1,105 @@
+<nav class="navbar">
+  <a routerLink="/" class="navbar__brand">{{ 'app.brand' | translate }}</a>
+
+  <div class="navbar__center">
+    @if (currentRole !== RoleEnum.GUEST) {
+    <a routerLink="/tracking" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">⌖</span>
+      <span>{{ 'nav.tracking' | translate }}</span>
+    </a>
+    }
+
+    @if (currentRole === RoleEnum.SUPER_ADMIN) {
+    <a routerLink="/companies" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">▦</span>
+      <span>{{ 'nav.companies' | translate }}</span>
+    </a>
+    <a routerLink="/clients" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">◎</span>
+      <span>{{ 'nav.clients' | translate }}</span>
+    </a>
+    } @if (currentRole === RoleEnum.MANAGER) {
+    <a routerLink="/clients" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">◎</span>
+      <span>{{ 'nav.clients' | translate }}</span>
+    </a>
+    <a routerLink="/employees" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">◫</span>
+      <span>{{ 'nav.employees' | translate }}</span>
+    </a>
+    <a routerLink="/drivers" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">●</span>
+      <span>{{ 'nav.drivers' | translate }}</span>
+    </a>
+    <a routerLink="/vehicles" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">▣</span>
+      <span>{{ 'nav.vehicles' | translate }}</span>
+    </a>
+    } @if (currentRole === RoleEnum.MANAGER || currentRole === RoleEnum.DISPECER) {
+    <a routerLink="/planning" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">◇</span>
+      <span>{{ 'nav.planning' | translate }}</span>
+    </a>
+    } @if (
+      currentRole === RoleEnum.MANAGER ||
+      currentRole === RoleEnum.DISPECER ||
+      currentRole === RoleEnum.CLIENT
+    ) {
+    <a routerLink="/orders" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">≡</span>
+      <span>{{ 'nav.orders' | translate }}</span>
+    </a>
+    }
+  </div>
+
+  <div class="navbar__actions">
+    @if ((isLoggedIn$ | async) && currentUser) {
+    <div class="navbar-profile">
+      <strong>{{ currentUser.full_name }}</strong>
+      <span>{{ 'dashboard.role.' + currentUser.role | translate }}</span>
+      @if (currentRole !== RoleEnum.SUPER_ADMIN && currentUser.company_name) {
+      <span>{{ 'nav.company' | translate }}: {{ currentUser.company_name }}</span>
+      }
+    </div>
+    }
+
+    <div class="language-menu" (click)="$event.stopPropagation()">
+      <button
+        type="button"
+        class="language-menu__trigger"
+        [attr.aria-label]="'nav.language' | translate"
+        [attr.aria-expanded]="isLanguageMenuOpen"
+        (click)="toggleLanguageMenu()"
+      >
+        <span class="language-icon">{{ selectedLanguage.icon }}</span>
+      </button>
+
+      @if (isLanguageMenuOpen) {
+      <div class="language-menu__dropdown">
+        @for (language of availableLanguages; track language.code) {
+        <button type="button" class="language-menu__option" (click)="setLanguage(language.code)">
+          <span class="language-icon">{{ language.icon }}</span>
+          <span>{{ language.label }}</span>
+        </button>
+        }
+      </div>
+      }
+    </div>
+
+    @if (isLoggedIn$ | async) {
+    <button type="button" (click)="logout()">
+      <span class="nav-icon" aria-hidden="true">←</span>
+      <span>{{ 'nav.logout' | translate }}</span>
+    </button>
+    } @else {
+    <a routerLink="/signup" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">+</span>
+      <span>{{ 'nav.signup' | translate }}</span>
+    </a>
+    <a routerLink="/login" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">→</span>
+      <span>{{ 'nav.login' | translate }}</span>
+    </a>
+    }
+  </div>
+</nav>

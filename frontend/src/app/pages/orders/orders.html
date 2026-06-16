@@ -1,0 +1,994 @@
+<section class="orders-page">
+  <div class="orders-header">
+    <div>
+      <span class="eyebrow">{{ 'orders.eyebrow' | translate }}</span>
+      <h1>{{ 'orders.title' | translate }}</h1>
+      <p>{{ 'orders.description' | translate }}</p>
+    </div>
+
+    @if (canCreateOrder()) {
+    <button type="button" class="primary-action" (click)="openCreateOrder()">
+      {{ 'orders.create_title' | translate }}
+    </button>
+    }
+  </div>
+
+  @if (createOrderSuccess) {
+  <div class="alert alert-success">{{ createOrderSuccess | translate }}</div>
+  }
+
+  @if (markProblematicSuccess) {
+  <div class="alert alert-success">{{ markProblematicSuccess | translate }}</div>
+  }
+
+  @if (updateOrderSuccess) {
+  <div class="alert alert-success">{{ updateOrderSuccess | translate }}</div>
+  }
+
+  @if (cancelOrderSuccess) {
+  <div class="alert alert-success">{{ cancelOrderSuccess | translate }}</div>
+  }
+
+  @if (loadOrdersError) {
+  <div class="alert alert-error">{{ loadOrdersError | translate }}</div>
+  }
+
+  @if (currentRole === RoleEnum.MANAGER) {
+  <div class="manager-actions">
+    <button type="button">{{ 'orders.manager.review_queue' | translate }}</button>
+    <button type="button">{{ 'orders.manager.assign_dispatcher' | translate }}</button>
+    <button type="button">{{ 'orders.manager.plan_route' | translate }}</button>
+    <button type="button">{{ 'orders.manager.approve_order' | translate }}</button>
+  </div>
+  }
+
+  <section class="orders-panel">
+    <div class="orders-toolbar">
+      <label class="filter-field filter-field-wide">
+        <span>{{ 'orders.search_label' | translate }}</span>
+        <input
+          type="search"
+          [value]="orderSearchTerm"
+          [placeholder]="'orders.search_placeholder' | translate"
+          (input)="updateOrderSearch($any($event.target).value)"
+        />
+      </label>
+
+      <label class="filter-field">
+        <span>{{ 'orders.filter.status' | translate }}</span>
+        <select [value]="selectedStatus" (change)="updateStatusFilter($any($event.target).value)">
+          <option value="all">{{ 'orders.filter.all_statuses' | translate }}</option>
+          <option value="PENDING">{{ 'orders.status.pending' | translate }}</option>
+          <option value="PLANNED">{{ 'orders.status.planned' | translate }}</option>
+          <option value="IN_DELIVERY">{{ 'orders.status.in_delivery' | translate }}</option>
+          <option value="DELIVERED">{{ 'orders.status.delivered' | translate }}</option>
+          <option value="FAILED">{{ 'orders.status.failed' | translate }}</option>
+          <option value="CANCELLED">{{ 'orders.status.cancelled' | translate }}</option>
+        </select>
+      </label>
+
+      <label class="filter-field">
+        <span>{{ 'orders.filter.priority' | translate }}</span>
+        <select [value]="selectedPriority" (change)="updatePriorityFilter($any($event.target).value)">
+          <option value="all">{{ 'orders.filter.all_priorities' | translate }}</option>
+          <option value="NORMAL">{{ 'orders.priority.normal' | translate }}</option>
+          <option value="URGENT">{{ 'orders.priority.urgent' | translate }}</option>
+          <option value="CRITIC">{{ 'orders.priority.critic' | translate }}</option>
+        </select>
+      </label>
+
+      <label class="filter-field">
+        <span>{{ 'orders.filter.cargo_type' | translate }}</span>
+        <select [value]="selectedCargoType" (change)="updateCargoTypeFilter($any($event.target).value)">
+          <option value="all">{{ 'orders.filter.all_cargo_types' | translate }}</option>
+          <option value="STANDARD">{{ 'orders.cargo.standard' | translate }}</option>
+          <option value="FRAGIL">{{ 'orders.cargo.fragile' | translate }}</option>
+          <option value="PERISABIL">{{ 'orders.cargo.perishable' | translate }}</option>
+          <option value="ADR">{{ 'orders.cargo.adr' | translate }}</option>
+        </select>
+      </label>
+
+      <label class="filter-field">
+        <span>{{ 'orders.filter.delivery_deadline' | translate }}</span>
+        <input
+          type="date"
+          [value]="selectedDeliveryDeadline"
+          (input)="updateDeliveryDeadlineFilter($any($event.target).value)"
+        />
+      </label>
+
+      <button type="button" class="secondary-action filter-clear" (click)="clearOrderFilters()">
+        {{ 'orders.filter.clear' | translate }}
+      </button>
+    </div>
+
+    <div class="panel-header">
+      <h2>{{ 'orders.panel_title' | translate }}</h2>
+      <span>{{ filteredOrders.length }}</span>
+    </div>
+
+    @if (isLoadingOrders) {
+    <div class="loading-state">
+      <h2>{{ 'orders.loading' | translate }}</h2>
+    </div>
+    } @else {
+    <div class="order-list">
+      @for (order of filteredOrders; track order.id) {
+      <article class="order-row" [class.order-row-problematic]="order.is_problematic">
+        <div class="order-card-header">
+          <div>
+            <span class="order-id">{{ order.order_ref }}</span>
+            <p>{{ 'orders.client' | translate }}: {{ getOrderClientLabel(order) }}</p>
+          </div>
+
+          <div class="order-status-stack">
+            <span class="status-badge">{{ getOrderStatusKey(order) | translate }}</span>
+            @if (hasOperationalWarnings(order)) {
+            <span
+              class="warning-icon"
+              style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 999px; background: rgba(245, 158, 11, 0.18); color: #92400e; font-weight: 900; cursor: help;"
+              [attr.aria-label]="'orders.operational_warnings' | translate"
+              [title]="getOperationalWarningsTitle(order)"
+            >
+              ⚠
+            </span>
+            }
+            @if (order.is_problematic) {
+            <span class="problem-badge">{{ 'orders.problematic' | translate }}</span>
+            }
+          </div>
+        </div>
+
+        <div class="order-route">
+          <h3>{{ order.address_pickup }}</h3>
+          <span aria-hidden="true">→</span>
+          <h3>{{ order.address_delivery }}</h3>
+        </div>
+
+        <div class="order-facts">
+          <span>{{ getOrderPriorityKey(order) | translate }}</span>
+          <span>{{ order.delivery_deadline }}</span>
+          <span>{{ order.kg }} kg / {{ order.m3 }} m3</span>
+        </div>
+
+        <div class="order-main">
+          @if (order.is_problematic && order.problem_reason) {
+          <p class="problem-reason">
+            {{ 'orders.problem_reason' | translate }}: {{ order.problem_reason }}
+          </p>
+          }
+        </div>
+
+        <div class="order-actions">
+          <button type="button" class="row-action" (click)="openViewOrder(order)">
+            {{ 'orders.view' | translate }}
+          </button>
+          @if (canCheckFeasibility()) {
+          <button type="button" class="row-action" (click)="openFeasibilityCheck(order)">
+            {{ 'orders.check_feasibility' | translate }}
+          </button>
+          }
+          @if (canEditOrder(order)) {
+          <button type="button" class="row-action" (click)="openEditOrder(order)">
+            {{ 'orders.edit' | translate }}
+          </button>
+          <button type="button" class="row-action" (click)="openServiceTime(order)">
+            {{ 'orders.service_time' | translate }}
+          </button>
+          }
+          @if (order.tracking_token) {
+          <a class="row-action" [routerLink]="['/tracking', order.tracking_token]">
+            {{ 'orders.track' | translate }}
+          </a>
+          }
+          @if (canMarkProblematic(order)) {
+          <button type="button" class="row-action row-action-danger" (click)="openMarkProblematic(order)">
+            {{ 'orders.mark_problematic' | translate }}
+          </button>
+          }
+          @if (canCancelOrder(order)) {
+          <button type="button" class="row-action row-action-danger" (click)="openCancelOrder(order)">
+            {{ 'orders.cancel_order' | translate }}
+          </button>
+          }
+        </div>
+      </article>
+      } @empty {
+      <div class="empty-state">
+        <p>{{ 'orders.empty' | translate }}</p>
+      </div>
+      }
+    </div>
+    }
+  </section>
+
+  @if (isCreateOrderOpen) {
+  <div class="modal-backdrop" (click)="closeCreateOrder()"></div>
+
+  <section
+    class="order-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'orders.create_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'orders.create_title' | translate }}</h2>
+        <p>{{ 'orders.create_description' | translate }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'orders.cancel' | translate"
+        (click)="closeCreateOrder()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="orderForm" (ngSubmit)="createOrder()">
+      <div class="form-grid">
+        @if (currentRole !== RoleEnum.CLIENT) {
+        <div class="form-group form-group-wide selector-group">
+          <label for="order_client_search">{{ 'orders.client' | translate }}</label>
+          <input
+            id="order_client_search"
+            type="search"
+            [value]="clientSearchTerm"
+            [placeholder]="'orders.client_search_placeholder' | translate"
+            (input)="updateClientSearch($any($event.target).value)"
+          />
+
+          @if (selectedClient) {
+          <div class="selected-option">
+            <strong>{{ selectedClient.full_name }}</strong>
+            <span>{{ selectedClient.email }}</span>
+          </div>
+          }
+
+          <div class="option-list">
+            @if (isLoadingClients) {
+            <div class="option-empty">{{ 'orders.loading_clients' | translate }}</div>
+            } @else {
+              @for (client of filteredClients; track client.id) {
+              <button
+                type="button"
+                class="option-item"
+                [class.selected]="orderForm.get('client_id')?.value === client.id"
+                (click)="selectClient(client)"
+              >
+                <span>
+                  <strong>{{ client.full_name }}</strong>
+                  <small>{{ client.email }}</small>
+                </span>
+                <small>{{ client.phone || ('vehicles.not_available' | translate) }}</small>
+              </button>
+              } @empty {
+              <div class="option-empty">{{ 'orders.no_clients' | translate }}</div>
+              }
+            }
+          </div>
+
+          @if (orderForm.get('client_id')?.touched && orderForm.get('client_id')?.invalid) {
+          <small>{{ 'orders.client_required' | translate }}</small>
+          }
+        </div>
+        }
+
+        <div class="form-group form-group-wide">
+          <label for="order_type_marfa">{{ 'orders.cargo_type' | translate }}</label>
+          <select id="order_type_marfa" formControlName="type_marfa">
+            <option value="STANDARD">{{ 'orders.cargo.standard' | translate }}</option>
+            <option value="FRAGIL">{{ 'orders.cargo.fragile' | translate }}</option>
+            <option value="PERISABIL">{{ 'orders.cargo.perishable' | translate }}</option>
+            <option value="ADR">{{ 'orders.cargo.adr' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group form-group-wide">
+          <label for="order_address_pickup">{{ 'orders.pickup_address' | translate }}</label>
+          <input
+            id="order_address_pickup"
+            type="text"
+            formControlName="address_pickup"
+            [placeholder]="'orders.pickup_address_placeholder' | translate"
+          />
+
+          @if (
+            orderForm.get('address_pickup')?.touched &&
+            orderForm.get('address_pickup')?.invalid
+          ) {
+          <small>{{ 'orders.pickup_address_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group form-group-wide">
+          <label for="order_address_delivery">{{ 'orders.delivery_address' | translate }}</label>
+          <input
+            id="order_address_delivery"
+            type="text"
+            formControlName="address_delivery"
+            [placeholder]="'orders.delivery_address_placeholder' | translate"
+          />
+
+          @if (
+            orderForm.get('address_delivery')?.touched &&
+            orderForm.get('address_delivery')?.invalid
+          ) {
+          <small>{{ 'orders.delivery_address_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="order_pickup_start">{{ 'orders.pickup_window_start' | translate }}</label>
+          <input id="order_pickup_start" type="time" formControlName="pickup_time_window_start" />
+        </div>
+
+        <div class="form-group">
+          <label for="order_pickup_end">{{ 'orders.pickup_window_end' | translate }}</label>
+          <input id="order_pickup_end" type="time" formControlName="pickup_time_window_end" />
+        </div>
+
+        <div class="form-group">
+          <label for="order_delivery_start">{{ 'orders.delivery_window_start' | translate }}</label>
+          <input
+            id="order_delivery_start"
+            type="time"
+            formControlName="delivery_time_window_start"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="order_delivery_end">{{ 'orders.delivery_window_end' | translate }}</label>
+          <input id="order_delivery_end" type="time" formControlName="delivery_time_window_end" />
+        </div>
+
+        <div class="form-group">
+          <label for="order_kg">{{ 'orders.kg' | translate }}</label>
+          <input id="order_kg" type="number" min="0.1" step="0.1" formControlName="kg" />
+
+          @if (orderForm.get('kg')?.touched && orderForm.get('kg')?.invalid) {
+          <small>{{ 'orders.positive_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="order_m3">{{ 'orders.m3' | translate }}</label>
+          <input id="order_m3" type="number" min="0.1" step="0.1" formControlName="m3" />
+
+          @if (orderForm.get('m3')?.touched && orderForm.get('m3')?.invalid) {
+          <small>{{ 'orders.positive_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="order_earliest_delivery_date">
+            {{ 'orders.earliest_delivery_date' | translate }}
+          </label>
+          <input
+            id="order_earliest_delivery_date"
+            type="date"
+            formControlName="earliest_delivery_date"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="order_delivery_deadline">{{ 'orders.delivery_deadline' | translate }}</label>
+          <input id="order_delivery_deadline" type="date" formControlName="delivery_deadline" />
+
+          @if (
+            orderForm.get('delivery_deadline')?.touched &&
+            orderForm.get('delivery_deadline')?.invalid
+          ) {
+          <small>{{ 'orders.delivery_deadline_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group form-group-wide">
+          <label for="order_priority">{{ 'orders.priority' | translate }}</label>
+          <select id="order_priority" formControlName="priority">
+            <option value="NORMAL">{{ 'orders.priority.normal' | translate }}</option>
+            <option value="URGENT">{{ 'orders.priority.urgent' | translate }}</option>
+            <option value="CRITIC">{{ 'orders.priority.critic' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group form-group-wide">
+          <label for="order_special_instructions">
+            {{ 'orders.special_instructions' | translate }}
+          </label>
+          <textarea
+            id="order_special_instructions"
+            formControlName="special_instructions"
+            rows="3"
+          ></textarea>
+        </div>
+      </div>
+
+      @if (clientOptionsError) {
+      <div class="alert alert-error">{{ clientOptionsError | translate }}</div>
+      }
+
+      @if (createOrderError) {
+      <div class="alert alert-error">{{ createOrderError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="secondary-action" (click)="closeCreateOrder()">
+          {{ 'orders.cancel' | translate }}
+        </button>
+        <button type="submit" class="primary-action" [disabled]="isCreatingOrder || isLoadingClients">
+          {{ (isCreatingOrder ? 'orders.creating' : 'orders.create_submit') | translate }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+
+  @if (selectedEditOrder) {
+  <div class="modal-backdrop" (click)="closeEditOrder()"></div>
+
+  <section
+    class="order-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'orders.edit_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'orders.edit_title' | translate }}</h2>
+        <p>{{ selectedEditOrder.order_ref }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'orders.cancel' | translate"
+        (click)="closeEditOrder()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="editOrderForm" (ngSubmit)="updateSelectedOrder()">
+      <div class="form-grid">
+        <div class="form-group form-group-wide">
+          <label for="edit_order_type_marfa">{{ 'orders.cargo_type' | translate }}</label>
+          <select id="edit_order_type_marfa" formControlName="type_marfa">
+            <option value="STANDARD">{{ 'orders.cargo.standard' | translate }}</option>
+            <option value="FRAGIL">{{ 'orders.cargo.fragile' | translate }}</option>
+            <option value="PERISABIL">{{ 'orders.cargo.perishable' | translate }}</option>
+            <option value="ADR">{{ 'orders.cargo.adr' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group form-group-wide">
+          <label for="edit_order_address_pickup">{{ 'orders.pickup_address' | translate }}</label>
+          <input
+            id="edit_order_address_pickup"
+            type="text"
+            formControlName="address_pickup"
+            [placeholder]="'orders.pickup_address_placeholder' | translate"
+          />
+
+          @if (
+            editOrderForm.get('address_pickup')?.touched &&
+            editOrderForm.get('address_pickup')?.invalid
+          ) {
+          <small>{{ 'orders.pickup_address_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group form-group-wide">
+          <label for="edit_order_address_delivery">{{ 'orders.delivery_address' | translate }}</label>
+          <input
+            id="edit_order_address_delivery"
+            type="text"
+            formControlName="address_delivery"
+            [placeholder]="'orders.delivery_address_placeholder' | translate"
+          />
+
+          @if (
+            editOrderForm.get('address_delivery')?.touched &&
+            editOrderForm.get('address_delivery')?.invalid
+          ) {
+          <small>{{ 'orders.delivery_address_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="edit_order_pickup_start">{{ 'orders.pickup_window_start' | translate }}</label>
+          <input id="edit_order_pickup_start" type="time" formControlName="pickup_time_window_start" />
+        </div>
+
+        <div class="form-group">
+          <label for="edit_order_pickup_end">{{ 'orders.pickup_window_end' | translate }}</label>
+          <input id="edit_order_pickup_end" type="time" formControlName="pickup_time_window_end" />
+        </div>
+
+        <div class="form-group">
+          <label for="edit_order_delivery_start">{{ 'orders.delivery_window_start' | translate }}</label>
+          <input
+            id="edit_order_delivery_start"
+            type="time"
+            formControlName="delivery_time_window_start"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="edit_order_delivery_end">{{ 'orders.delivery_window_end' | translate }}</label>
+          <input id="edit_order_delivery_end" type="time" formControlName="delivery_time_window_end" />
+        </div>
+
+        <div class="form-group">
+          <label for="edit_order_kg">{{ 'orders.kg' | translate }}</label>
+          <input id="edit_order_kg" type="number" min="0.1" step="0.1" formControlName="kg" />
+
+          @if (editOrderForm.get('kg')?.touched && editOrderForm.get('kg')?.invalid) {
+          <small>{{ 'orders.positive_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="edit_order_m3">{{ 'orders.m3' | translate }}</label>
+          <input id="edit_order_m3" type="number" min="0.1" step="0.1" formControlName="m3" />
+
+          @if (editOrderForm.get('m3')?.touched && editOrderForm.get('m3')?.invalid) {
+          <small>{{ 'orders.positive_number' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="edit_order_earliest_delivery_date">
+            {{ 'orders.earliest_delivery_date' | translate }}
+          </label>
+          <input
+            id="edit_order_earliest_delivery_date"
+            type="date"
+            formControlName="earliest_delivery_date"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="edit_order_delivery_deadline">{{ 'orders.delivery_deadline' | translate }}</label>
+          <input id="edit_order_delivery_deadline" type="date" formControlName="delivery_deadline" />
+
+          @if (
+            editOrderForm.get('delivery_deadline')?.touched &&
+            editOrderForm.get('delivery_deadline')?.invalid
+          ) {
+          <small>{{ 'orders.delivery_deadline_required' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group form-group-wide">
+          <label for="edit_order_priority">{{ 'orders.priority' | translate }}</label>
+          <select id="edit_order_priority" formControlName="priority">
+            <option value="NORMAL">{{ 'orders.priority.normal' | translate }}</option>
+            <option value="URGENT">{{ 'orders.priority.urgent' | translate }}</option>
+            <option value="CRITIC">{{ 'orders.priority.critic' | translate }}</option>
+          </select>
+        </div>
+
+        <div class="form-group form-group-wide">
+          <label for="edit_order_special_instructions">
+            {{ 'orders.special_instructions' | translate }}
+          </label>
+          <textarea
+            id="edit_order_special_instructions"
+            formControlName="special_instructions"
+            rows="3"
+          ></textarea>
+        </div>
+      </div>
+
+      @if (updateOrderError) {
+      <div class="alert alert-error">{{ updateOrderError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        @if (selectedEditOrder.is_problematic) {
+        <button
+          type="button"
+          class="secondary-action"
+          [disabled]="isUpdatingOrder"
+          (click)="clearSelectedOrderProblematic()"
+        >
+          {{ 'orders.clear_problematic' | translate }}
+        </button>
+        }
+        <button type="button" class="secondary-action" (click)="closeEditOrder()">
+          {{ 'orders.cancel' | translate }}
+        </button>
+        <button type="submit" class="primary-action" [disabled]="isUpdatingOrder">
+          {{ (isUpdatingOrder ? 'orders.updating' : 'orders.update_submit') | translate }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+
+  @if (selectedCancelOrder) {
+  <div class="modal-backdrop" (click)="closeCancelOrder()"></div>
+
+  <section
+    class="order-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'orders.cancel_order_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'orders.cancel_order_title' | translate }}</h2>
+        <p>{{ selectedCancelOrder.order_ref }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'orders.cancel' | translate"
+        (click)="closeCancelOrder()"
+      >
+        X
+      </button>
+    </div>
+
+    <p>{{ 'orders.cancel_order_description' | translate }}</p>
+
+    @if (cancelOrderError) {
+    <div class="alert alert-error">{{ cancelOrderError | translate }}</div>
+    }
+
+    <div class="form-actions">
+      <button type="button" class="secondary-action" (click)="closeCancelOrder()">
+        {{ 'orders.cancel' | translate }}
+      </button>
+      <button type="button" class="primary-action" [disabled]="isCancellingOrder" (click)="cancelSelectedOrder()">
+        {{ (isCancellingOrder ? 'orders.cancelling_order' : 'orders.cancel_order_submit') | translate }}
+      </button>
+    </div>
+  </section>
+  }
+
+  @if (selectedProblemOrder) {
+  <div class="modal-backdrop" (click)="closeMarkProblematic()"></div>
+
+  <section
+    class="order-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'orders.mark_problematic_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'orders.mark_problematic_title' | translate }}</h2>
+        <p>{{ selectedProblemOrder.order_ref }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'orders.cancel' | translate"
+        (click)="closeMarkProblematic()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="problemForm" (ngSubmit)="markSelectedOrderProblematic()">
+      <div class="form-group form-group-wide">
+        <label for="problem_reason">{{ 'orders.problem_reason' | translate }}</label>
+        <textarea
+          id="problem_reason"
+          formControlName="problem_reason"
+          rows="4"
+          [placeholder]="'orders.problem_reason_placeholder' | translate"
+        ></textarea>
+
+        @if (problemForm.get('problem_reason')?.touched && problemForm.get('problem_reason')?.invalid) {
+        <small>{{ 'orders.problem_reason_required' | translate }}</small>
+        }
+      </div>
+
+      @if (markProblematicError) {
+      <div class="alert alert-error">{{ markProblematicError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="secondary-action" (click)="closeMarkProblematic()">
+          {{ 'orders.cancel' | translate }}
+        </button>
+        <button type="submit" class="primary-action" [disabled]="isMarkingProblematic">
+          {{
+            (isMarkingProblematic
+              ? 'orders.marking_problematic'
+              : 'orders.mark_problematic_submit'
+            ) | translate
+          }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+
+  @if (selectedServiceTimeOrder) {
+  <div class="modal-backdrop" (click)="closeServiceTime()"></div>
+
+  <section
+    class="order-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'orders.service_time_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'orders.service_time_title' | translate }}</h2>
+        <p>{{ selectedServiceTimeOrder.order_ref }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'orders.cancel' | translate"
+        (click)="closeServiceTime()"
+      >
+        X
+      </button>
+    </div>
+
+    <form [formGroup]="serviceTimeForm" (ngSubmit)="updateSelectedOrderServiceTime()">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="pickup_service_minutes">
+            {{ 'orders.details.pickup_service_minutes' | translate }}
+          </label>
+          <input
+            id="pickup_service_minutes"
+            type="number"
+            min="1"
+            max="240"
+            step="1"
+            formControlName="pickup_service_minutes"
+          />
+
+          @if (
+            serviceTimeForm.get('pickup_service_minutes')?.touched &&
+            serviceTimeForm.get('pickup_service_minutes')?.invalid
+          ) {
+          <small>{{ 'orders.service_time_invalid' | translate }}</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="delivery_service_minutes">
+            {{ 'orders.details.delivery_service_minutes' | translate }}
+          </label>
+          <input
+            id="delivery_service_minutes"
+            type="number"
+            min="1"
+            max="240"
+            step="1"
+            formControlName="delivery_service_minutes"
+          />
+
+          @if (
+            serviceTimeForm.get('delivery_service_minutes')?.touched &&
+            serviceTimeForm.get('delivery_service_minutes')?.invalid
+          ) {
+          <small>{{ 'orders.service_time_invalid' | translate }}</small>
+          }
+        </div>
+      </div>
+
+      @if (serviceTimeError) {
+      <div class="alert alert-error">{{ serviceTimeError | translate }}</div>
+      }
+
+      <div class="form-actions">
+        <button type="button" class="secondary-action" (click)="closeServiceTime()">
+          {{ 'orders.cancel' | translate }}
+        </button>
+        <button type="submit" class="primary-action" [disabled]="isUpdatingServiceTime">
+          {{ (isUpdatingServiceTime ? 'orders.updating' : 'orders.update_submit') | translate }}
+        </button>
+      </div>
+    </form>
+  </section>
+  }
+
+  @if (selectedFeasibilityOrder) {
+  <div class="modal-backdrop" (click)="closeFeasibilityCheck()"></div>
+
+  <section
+    class="order-form-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'orders.feasibility_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'orders.feasibility_title' | translate }}</h2>
+        <p>{{ selectedFeasibilityOrder.order_ref }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'orders.close' | translate"
+        (click)="closeFeasibilityCheck()"
+      >
+        X
+      </button>
+    </div>
+
+    @if (isCheckingFeasibility) {
+    <div class="loading-state">
+      <h2>{{ 'orders.checking_feasibility' | translate }}</h2>
+    </div>
+    }
+
+    @if (feasibilityError) {
+    <div class="alert alert-error">{{ feasibilityError | translate }}</div>
+    }
+
+    @if (feasibilityResult) {
+    <div class="details-section">
+      <h3>
+        {{
+          (feasibilityResult.is_feasible
+            ? 'orders.feasibility_feasible'
+            : 'orders.feasibility_not_feasible'
+          ) | translate
+        }}
+      </h3>
+
+      @if (feasibilityResult.warnings.length) {
+      <ul>
+        @for (warning of feasibilityResult.warnings; track warning) {
+        <li>{{ warning }}</li>
+        }
+      </ul>
+      } @else {
+      <p>{{ 'orders.feasibility_no_warnings' | translate }}</p>
+      }
+    </div>
+    }
+
+    <div class="form-actions">
+      <button type="button" class="secondary-action" (click)="closeFeasibilityCheck()">
+        {{ 'orders.close' | translate }}
+      </button>
+      <button
+        type="button"
+        class="primary-action"
+        [disabled]="isCheckingFeasibility"
+        (click)="checkSelectedOrderFeasibility()"
+      >
+        {{ 'orders.check_again' | translate }}
+      </button>
+    </div>
+  </section>
+  }
+
+  @if (selectedViewOrder) {
+  <div class="modal-backdrop" (click)="closeViewOrder()"></div>
+
+  <section
+    class="order-details-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'orders.view_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'orders.view_title' | translate }}</h2>
+        <p>{{ selectedViewOrder.order_ref }}</p>
+      </div>
+
+      <button
+        type="button"
+        class="icon-action"
+        [attr.aria-label]="'orders.close' | translate"
+        (click)="closeViewOrder()"
+      >
+        X
+      </button>
+    </div>
+
+    <div class="details-grid">
+      <section class="details-section">
+        <h3>{{ 'orders.details.identity' | translate }}</h3>
+        <dl>
+          <div><dt>{{ 'orders.details.id' | translate }}</dt><dd>{{ selectedViewOrder.id }}</dd></div>
+          <div><dt>{{ 'orders.details.order_ref' | translate }}</dt><dd>{{ selectedViewOrder.order_ref }}</dd></div>
+          <div><dt>{{ 'orders.details.company_id' | translate }}</dt><dd>{{ selectedViewOrder.company_id }}</dd></div>
+          <div><dt>{{ 'orders.client' | translate }}</dt><dd>{{ getOrderClientLabel(selectedViewOrder) }}</dd></div>
+        </dl>
+      </section>
+
+      <section class="details-section">
+        <h3>{{ 'orders.details.route' | translate }}</h3>
+        <dl>
+          <div><dt>{{ 'orders.pickup_address' | translate }}</dt><dd>{{ selectedViewOrder.address_pickup }}</dd></div>
+          <div><dt>{{ 'orders.delivery_address' | translate }}</dt><dd>{{ selectedViewOrder.address_delivery }}</dd></div>
+          <div><dt>{{ 'orders.details.pickup_lat' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.pickup_lat) | translate }}</dd></div>
+          <div><dt>{{ 'orders.details.pickup_lon' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.pickup_lon) | translate }}</dd></div>
+          <div><dt>{{ 'orders.details.delivery_lat' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.delivery_lat) | translate }}</dd></div>
+          <div><dt>{{ 'orders.details.delivery_lon' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.delivery_lon) | translate }}</dd></div>
+        </dl>
+      </section>
+
+      <section class="details-section">
+        <h3>{{ 'orders.details.windows' | translate }}</h3>
+        <dl>
+          <div><dt>{{ 'orders.pickup_window_start' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.pickup_time_window_start) | translate }}</dd></div>
+          <div><dt>{{ 'orders.pickup_window_end' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.pickup_time_window_end) | translate }}</dd></div>
+          <div><dt>{{ 'orders.delivery_window_start' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.delivery_time_window_start) | translate }}</dd></div>
+          <div><dt>{{ 'orders.delivery_window_end' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.delivery_time_window_end) | translate }}</dd></div>
+        </dl>
+      </section>
+
+      <section class="details-section">
+        <h3>{{ 'orders.details.cargo' | translate }}</h3>
+        <dl>
+          <div><dt>{{ 'orders.kg' | translate }}</dt><dd>{{ selectedViewOrder.kg }}</dd></div>
+          <div><dt>{{ 'orders.m3' | translate }}</dt><dd>{{ selectedViewOrder.m3 }}</dd></div>
+          <div><dt>{{ 'orders.cargo_type' | translate }}</dt><dd>{{ getOrderCargoTypeKey(selectedViewOrder) | translate }}</dd></div>
+          <div><dt>{{ 'orders.priority' | translate }}</dt><dd>{{ getOrderPriorityKey(selectedViewOrder) | translate }}</dd></div>
+        </dl>
+      </section>
+
+      <section class="details-section">
+        <h3>{{ 'orders.details.service_time' | translate }}</h3>
+        <dl>
+          <div><dt>{{ 'orders.details.pickup_service_minutes' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.pickup_service_minutes) | translate }}</dd></div>
+          <div><dt>{{ 'orders.details.delivery_service_minutes' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.delivery_service_minutes) | translate }}</dd></div>
+          <div><dt>{{ 'orders.details.service_time_source' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.service_time_source) | translate }}</dd></div>
+        </dl>
+      </section>
+
+      <section class="details-section">
+        <h3>{{ 'orders.details.planning' | translate }}</h3>
+        <dl>
+          <div><dt>{{ 'orders.earliest_delivery_date' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.earliest_delivery_date) | translate }}</dd></div>
+          <div><dt>{{ 'orders.delivery_deadline' | translate }}</dt><dd>{{ selectedViewOrder.delivery_deadline }}</dd></div>
+          <div><dt>{{ 'orders.details.flexibility_days' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.flexibility_days) | translate }}</dd></div>
+          <div><dt>{{ 'orders.details.assigned_delivery_date' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.assigned_delivery_date) | translate }}</dd></div>
+        </dl>
+      </section>
+
+      <section class="details-section">
+        <h3>{{ 'orders.details.status' | translate }}</h3>
+        <dl>
+          <div><dt>{{ 'orders.details.status' | translate }}</dt><dd>{{ getOrderStatusKey(selectedViewOrder) | translate }}</dd></div>
+          <div><dt>{{ 'orders.details.source' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.source) | translate }}</dd></div>
+          <div><dt>{{ 'orders.details.attempts_count' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.attempts_count) | translate }}</dd></div>
+          <div><dt>{{ 'orders.details.created_at' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.created_at) | translate }}</dd></div>
+        </dl>
+      </section>
+
+      <section class="details-section">
+        <h3>{{ 'orders.details.tracking' | translate }}</h3>
+        <dl>
+          <div><dt>{{ 'orders.details.tracking_token' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.tracking_token) | translate }}</dd></div>
+          <div>
+            <dt>{{ 'orders.details.is_problematic' | translate }}</dt>
+            <dd>{{ (selectedViewOrder.is_problematic ? 'orders.value.yes' : 'orders.value.no') | translate }}</dd>
+          </div>
+          <div><dt>{{ 'orders.details.problem_reason' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.problem_reason) | translate }}</dd></div>
+          <div><dt>{{ 'orders.special_instructions' | translate }}</dt><dd>{{ displayValue(selectedViewOrder.special_instructions) | translate }}</dd></div>
+        </dl>
+      </section>
+    </div>
+  </section>
+  }
+</section>

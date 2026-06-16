@@ -1,0 +1,172 @@
+<section class="clients-page">
+  <div class="clients-header">
+    <div>
+      <span class="eyebrow">{{ 'clients.eyebrow' | translate }}</span>
+      <h1>{{ 'clients.title' | translate }}</h1>
+      <p>
+        {{
+          (currentRole === RoleEnum.SUPER_ADMIN
+            ? 'clients.description_super'
+            : 'clients.description_manager'
+          ) | translate
+        }}
+      </p>
+    </div>
+  </div>
+
+  @if (loadClientsError) {
+  <div class="alert alert-error">{{ loadClientsError | translate }}</div>
+  }
+
+  <div class="clients-toolbar">
+    <label class="search-field">
+      <span>{{ 'clients.search_label' | translate }}</span>
+      <input
+        type="search"
+        [value]="searchTerm"
+        [placeholder]="'clients.search_placeholder' | translate"
+        (input)="updateSearch($any($event.target).value)"
+      />
+    </label>
+
+    @if (currentRole === RoleEnum.SUPER_ADMIN) {
+    <label class="company-filter-field">
+      <span>{{ 'clients.company_filter_label' | translate }}</span>
+      <select [value]="selectedCompanyId" (change)="updateSelectedCompany($any($event.target).value)">
+        <option value="all">{{ 'clients.company_filter_all' | translate }}</option>
+        @for (company of companyFilterOptions; track company.companyId) {
+        <option [value]="company.companyId">
+          {{ company.companyName || ('clients.no_company' | translate) }}
+        </option>
+        }
+      </select>
+    </label>
+    }
+  </div>
+
+  @if (isLoadingClients) {
+  <div class="loading-state">
+    <h2>{{ 'clients.loading' | translate }}</h2>
+  </div>
+  } @else {
+  <section class="clients-panel">
+    <div class="panel-header">
+      <h2>{{ 'clients.panel_title' | translate }}</h2>
+      <span>{{ filteredClients.length }}</span>
+    </div>
+
+    @if (currentRole === RoleEnum.SUPER_ADMIN) {
+    <div class="company-groups">
+      @for (group of groupedClients; track group.companyId) {
+      <section class="company-client-group">
+        <button
+          type="button"
+          class="company-group-header"
+          [attr.aria-expanded]="!isCompanyCollapsed(group.companyId)"
+          (click)="toggleCompanyGroup(group.companyId)"
+        >
+          <span class="company-group-title">
+            <strong>
+              {{
+                group.companyName
+                  ? group.companyName
+                  : ('clients.no_company' | translate)
+              }}
+            </strong>
+            <small>{{ group.companyId === 'no-company' ? ('clients.no_company' | translate) : group.companyId }}</small>
+          </span>
+          <span class="company-group-actions">
+            <span class="company-group-count">{{ group.clients.length }}</span>
+            <span class="company-group-toggle">
+              {{
+                (isCompanyCollapsed(group.companyId)
+                  ? 'clients.expand'
+                  : 'clients.collapse'
+                ) | translate
+              }}
+            </span>
+          </span>
+        </button>
+
+        @if (!isCompanyCollapsed(group.companyId)) {
+        <div class="client-list">
+          @for (client of group.clients; track client.id) {
+          <article class="client-row">
+            <div class="client-main">
+              <span class="client-id">{{ client.id }}</span>
+              <h3>{{ client.full_name }}</h3>
+              <p>{{ client.email }}</p>
+            </div>
+
+            <div class="client-meta">
+              <span class="status-badge">{{ approvalStatusKey(client) | translate }}</span>
+              <span class="status-badge muted-badge">{{ activityStatusKey(client) | translate }}</span>
+              <small>{{ client.phone || ('vehicles.not_available' | translate) }}</small>
+              @if (!client.is_approved) {
+              <button
+                type="button"
+                class="approve-client-button"
+                [disabled]="isApprovingClient(client.id)"
+                (click)="approveClient(client)"
+              >
+                {{
+                  (isApprovingClient(client.id)
+                    ? 'clients.approving'
+                    : 'clients.approve'
+                  ) | translate
+                }}
+              </button>
+              }
+            </div>
+          </article>
+          }
+        </div>
+        }
+      </section>
+      } @empty {
+      <div class="empty-state">
+        <p>{{ 'clients.empty' | translate }}</p>
+      </div>
+      }
+    </div>
+    } @else {
+    <div class="client-list">
+      @for (client of filteredClients; track client.id) {
+      <article class="client-row">
+        <div class="client-main">
+          <span class="client-id">{{ client.id }}</span>
+          <h3>{{ client.full_name }}</h3>
+          <p>{{ client.email }}</p>
+        </div>
+
+        <div class="client-meta">
+          <span class="status-badge">{{ approvalStatusKey(client) | translate }}</span>
+          <span class="status-badge muted-badge">{{ activityStatusKey(client) | translate }}</span>
+          <small>{{ client.phone || ('vehicles.not_available' | translate) }}</small>
+          @if (!client.is_approved) {
+          <button
+            type="button"
+            class="approve-client-button"
+            [disabled]="isApprovingClient(client.id)"
+            (click)="approveClient(client)"
+          >
+            {{
+              (isApprovingClient(client.id)
+                ? 'clients.approving'
+                : 'clients.approve'
+              ) | translate
+            }}
+          </button>
+          }
+        </div>
+      </article>
+      } @empty {
+      <div class="empty-state">
+        <p>{{ 'clients.empty' | translate }}</p>
+      </div>
+      }
+    </div>
+    }
+  </section>
+  }
+</section>
