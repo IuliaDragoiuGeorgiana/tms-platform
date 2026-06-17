@@ -12,7 +12,8 @@ from app.models.driver import Driver, DriverStatusEnum
 from app.models.trip import Trip, TripStatusEnum
 from app.models.trip_stop import TripStop, StopStatusEnum, StopTypeEnum
 from app.models.planning_session import PlanningSession, PlanningStrategyEnum, PlanningStatusEnum
-from app.services.ors_service import geocode, get_distance_matrix
+from app.models.company import Company
+from app.services.ors_service import geocode, geocode_with_components, get_distance_matrix
 from app.services.clustering_service import calculate_num_clusters, cluster_orders
 from app.services.vrp_service import solve_pdp_for_cluster
 from app.services.service_time_service import ensure_order_service_times
@@ -22,7 +23,6 @@ from app.services.strategy_service import distribute_orders_by_strategy
 from zoneinfo import ZoneInfo
 from sqlalchemy import or_
 
-DEPOT_COORDS = {"lat": 46.7712, "lon": 23.5896}
 LOCAL_TZ = ZoneInfo("Europe/Bucharest")
 DEFAULT_BREAK_MINUTES = 30
 DEFAULT_TRAVEL_BUFFER_MINUTES = 30
@@ -36,6 +36,106 @@ def time_to_seconds(t) -> int:
 def priority_rank(order: Order) -> int:
     priority = order.priority.value if hasattr(order.priority, "value") else str(order.priority)
     return {"CRITIC": 0, "URGENT": 1, "NORMAL": 2}.get(priority, 2)
+
+
+def _build_order_address_for_geocoding(order: Order, address_type: str) -> str:
+    """
+    Construiește o adresă structurată pentru geocodare din comenză.
+
+    În câmpurile modelului, `county` înseamnă județ (ex: Timiș, Hunedoara),
+    iar țara rămâne fixată la Romania pentru ORS.
+
+    Prioritate:
+    1. Dacă sunt componente structurate, le folosește (mai precis)
+    2. Altfel, folosește textul adresei libere
+
+    address_type: "pickup" sau "delivery"
+    """
+    if address_type == "pickup":
+        parts = [
+            order.pickup_street,
+            order.pickup_number,
+            order.pickup_city,
+            order.pickup_county,
+        ]
+        fallback = order.address_pickup
+    else:
+        parts = [
+            order.delivery_street,
+            order.delivery_number,
+            order.delivery_city,
+            order.delivery_county,
+        ]
+        fallback = order.address_delivery
+
+    clean_parts = [str(p).strip() for p in parts if p and str(p).strip()]
+
+    if clean_parts:
+        clean_parts.append("Romania")
+        return ", ".join(clean_parts)
+
+    return fallback
+
+
+def _build_company_depot_address(company: Company) -> str | None:
+    """
+    Construiește adresa textuală a garajului companiei pentru geocodare.
+    Format: street number, city, county/județ, Romania
+    """
+    address_parts = [
+        company.depot_street,
+        company.depot_number,
+        company.depot_city,
+        company.depot_county,
+    ]
+
+    clean_parts = [
+        str(part).strip()
+        for part in address_parts
+        if part and str(part).strip()
+    ]
+
+    if not clean_parts:
+        return None
+
+    clean_parts.append("Romania")
+
+    return ", ".join(clean_parts)
+
+
+def _ensure_company_depot_coords(db: Session, company: Company) -> tuple[float, float]:
+    """
+    Returnează coordonatele garajului companiei.
+
+    Dacă depot_lat/depot_lon există, le folosește.
+    Dacă lipsesc, încearcă să geocodeze adresa garajului și salvează coordonatele.
+    """
+    if company.depot_lat is not None and company.depot_lon is not None:
+        return float(company.depot_lat), float(company.depot_lon)
+
+    depot_address = _build_company_depot_address(company)
+
+    if not depot_address:
+        raise ValueError(
+            "Compania nu are adresa garajului configurată. "
+            "Trebuie completate cel puțin: oraș și județ."
+        )
+
+    result = geocode(depot_address)
+
+    if not result:
+        raise ValueError(
+            f"Adresa garajului companiei nu a putut fi geocodată: {depot_address}. "
+            "Verificați dacă adresa este corectă."
+        )
+
+    company.depot_lat = result["lat"]
+    company.depot_lon = result["lon"]
+
+    db.flush()
+
+    return float(company.depot_lat), float(company.depot_lon)
+
 
 def _time_to_minutes(value) -> int:
     """
@@ -302,13 +402,15 @@ def _calculate_penalty(order: Order, planned_date: date) -> int:
     return base_penalty + deadline_bonus
 
 
-def _build_solver_data(orders, db, depot_start_seconds=5 * 3600):
+def _build_solver_data(orders, db, depot_lat, depot_lon, depot_start_seconds=5 * 3600):
     """
     Construiește toate datele necesare pentru OR-Tools dintr-o listă de comenzi.
     Returnează un dict cu coords, pickups_deliveries, demands, volume_demands,
     time_windows, service_times.
 
     Args:
+        depot_lat: latitudinea garajului
+        depot_lon: longitudinea garajului
         depot_start_seconds: ora de start a depotului (implicit 05:00)
     """
     num_orders = len(orders)
@@ -316,7 +418,7 @@ def _build_solver_data(orders, db, depot_start_seconds=5 * 3600):
     depot_window = (depot_start_seconds, 24 * 3600)
 
     # Coordonate: depot + pickups + deliveries
-    coords = [[DEPOT_COORDS["lon"], DEPOT_COORDS["lat"]]]
+    coords = [[depot_lon, depot_lat]]
     for order in orders:
         coords.append([float(order.pickup_lon), float(order.pickup_lat)])
     for order in orders:
@@ -537,6 +639,8 @@ def _plan_day(
     planned_date: date,
     planning_session_id,
     dry_run: bool,
+    depot_lat: float,
+    depot_lon: float,
     forced_num_clusters: int | None = None,
 ) -> dict:
     """
@@ -763,6 +867,8 @@ def _plan_day(
             solver_data = _build_solver_data(
                 current_orders,
                 db,
+                depot_lat=depot_lat,
+                depot_lon=depot_lon,
                 depot_start_seconds=depot_start_seconds,
             )
 
@@ -1347,6 +1453,8 @@ def _plan_day_with_driver_time_retry(
     planned_date: date,
     planning_session_id,
     dry_run: bool,
+    depot_lat: float,
+    depot_lon: float,
 ) -> dict:
     """
     Variantă simplificată și rapidă:
@@ -1375,6 +1483,8 @@ def _plan_day_with_driver_time_retry(
         planned_date=planned_date,
         planning_session_id=planning_session_id,
         dry_run=dry_run,
+        depot_lat=depot_lat,
+        depot_lon=depot_lon,
         forced_num_clusters=num_clusters,
     )
 
@@ -1882,6 +1992,8 @@ def _solve_orders_for_vehicle(
     db: Session,
     orders: list[Order],
     vehicle: Vehicle,
+    depot_lat: float,
+    depot_lon: float,
     depot_start_seconds: int,
 ) -> dict:
     """
@@ -1894,6 +2006,8 @@ def _solve_orders_for_vehicle(
     solver_data = _build_solver_data(
         orders=orders,
         db=db,
+        depot_lat=depot_lat,
+        depot_lon=depot_lon,
         depot_start_seconds=depot_start_seconds,
     )
 
@@ -1968,6 +2082,13 @@ def _reoptimize_trip_with_orders(
     if not vehicle:
         raise ValueError("Trip-ul nu are vehicul asociat")
 
+    company = db.query(Company).filter(Company.id == trip.company_id).first()
+
+    if not company:
+        raise ValueError("Compania nu a fost găsită")
+
+    depot_lat, depot_lon = _ensure_company_depot_coords(db, company)
+
     # Păstrează ora de start a trip-ului existent, nu folosi mereu 05:00
     depot_start_seconds = _get_trip_start_seconds(trip)
 
@@ -1976,6 +2097,8 @@ def _reoptimize_trip_with_orders(
         db=db,
         orders=orders,
         vehicle=vehicle,
+        depot_lat=depot_lat,
+        depot_lon=depot_lon,
         depot_start_seconds=depot_start_seconds,
     )
 
@@ -2273,7 +2396,8 @@ def add_order_to_trip(
         )
 
     if order_to_add.pickup_lat is None or order_to_add.pickup_lon is None:
-        result = geocode(order_to_add.address_pickup)
+        pickup_address = _build_order_address_for_geocoding(order_to_add, "pickup")
+        result = geocode_with_components(pickup_address)
 
         if not result:
             raise ValueError(
@@ -2282,9 +2406,14 @@ def add_order_to_trip(
 
         order_to_add.pickup_lat = result["lat"]
         order_to_add.pickup_lon = result["lon"]
+        order_to_add.pickup_county = result.get("county") or order_to_add.pickup_county
+        order_to_add.pickup_city = result.get("city") or order_to_add.pickup_city
+        order_to_add.pickup_street = result.get("street") or order_to_add.pickup_street
+        order_to_add.pickup_number = result.get("number") or order_to_add.pickup_number
 
     if order_to_add.delivery_lat is None or order_to_add.delivery_lon is None:
-        result = geocode(order_to_add.address_delivery)
+        delivery_address = _build_order_address_for_geocoding(order_to_add, "delivery")
+        result = geocode_with_components(delivery_address)
 
         if not result:
             raise ValueError(
@@ -2293,6 +2422,10 @@ def add_order_to_trip(
 
         order_to_add.delivery_lat = result["lat"]
         order_to_add.delivery_lon = result["lon"]
+        order_to_add.delivery_county = result.get("county") or order_to_add.delivery_county
+        order_to_add.delivery_city = result.get("city") or order_to_add.delivery_city
+        order_to_add.delivery_street = result.get("street") or order_to_add.delivery_street
+        order_to_add.delivery_number = result.get("number") or order_to_add.delivery_number
 
     vehicle = trip.vehicle
 
@@ -2362,6 +2495,320 @@ def add_order_to_trip(
     }
 
 
+def create_ad_hoc_trip(
+    db: Session,
+    session_id: uuid.UUID,
+    company_id: uuid.UUID,
+    planned_date: date,
+    driver_id: uuid.UUID,
+    vehicle_id: uuid.UUID,
+    order_ids: list[uuid.UUID],
+) -> dict:
+    """
+    Creează un trip nou ad-hoc într-o sesiune de planificare PROPOSED.
+
+    Validări:
+    - sesiunea există și este PROPOSED;
+    - data trip-ului este în intervalul sesiunii;
+    - șoferul există, aparține companiei și este AVAILABLE;
+    - vehiculul există, aparține companiei și este DISPONIBIL;
+    - comenzile există, aparțin companiei, sunt PENDING și neproblematice;
+    - comenzile sunt eligibile pentru data trip-ului;
+    - comenzile au coordonate sau pot fi geocodate;
+    - fiecare comandă încape individual în vehicul;
+    - ruta este fezabilă cu OR-Tools;
+    - ruta respectă time windows, capacitate dinamică și programul șoferului;
+    - șoferul nu are alt trip suprapus.
+    """
+    if not order_ids:
+        raise ValueError("Trebuie selectată cel puțin o comandă")
+
+    unique_order_ids = list(dict.fromkeys(order_ids))
+
+    if len(unique_order_ids) != len(order_ids):
+        raise ValueError("Lista de comenzi conține duplicate")
+
+    session = db.query(PlanningSession).filter(
+        PlanningSession.id == session_id,
+        PlanningSession.company_id == company_id,
+    ).first()
+
+    if not session:
+        raise ValueError("Sesiunea de planificare nu a fost găsită")
+
+    if session.status != PlanningStatusEnum.PROPOSED:
+        raise ValueError(
+            f"Sesiunea nu este în stare PROPOSED. Status actual: {session.status.value}"
+        )
+
+    if planned_date < session.date_range_start or planned_date > session.date_range_end:
+        raise ValueError(
+            "Data trip-ului nu este în intervalul sesiunii de planificare. "
+            f"Interval sesiune: {session.date_range_start} - {session.date_range_end}"
+        )
+
+    driver = db.query(Driver).filter(
+        Driver.id == driver_id,
+        Driver.company_id == company_id,
+        Driver.status == DriverStatusEnum.AVAILABLE,
+    ).first()
+
+    if not driver:
+        raise ValueError("Șoferul nu a fost găsit sau nu este disponibil")
+
+    vehicle = db.query(Vehicle).filter(
+        Vehicle.id == vehicle_id,
+        Vehicle.company_id == company_id,
+        Vehicle.status == VehicleStatusEnum.DISPONIBIL,
+    ).first()
+
+    if not vehicle:
+        raise ValueError("Vehiculul nu a fost găsit sau nu este disponibil")
+
+    orders = db.query(Order).filter(
+        Order.id.in_(unique_order_ids),
+        Order.company_id == company_id,
+    ).all()
+
+    orders_by_id = {order.id: order for order in orders}
+
+    if len(orders) != len(unique_order_ids):
+        raise ValueError("Una sau mai multe comenzi nu au fost găsite")
+
+    ordered_orders = []
+
+    for order_id in unique_order_ids:
+        order = orders_by_id.get(order_id)
+
+        if not order:
+            raise ValueError("Una sau mai multe comenzi nu au fost găsite")
+
+        if order.status != OrderStatusEnum.PENDING:
+            raise ValueError(
+                f"Comanda {order.order_ref} nu poate fi adăugată deoarece nu este PENDING. "
+                f"Status actual: {order.status.value}"
+            )
+
+        if order.is_problematic:
+            raise ValueError(
+                f"Comanda {order.order_ref} este marcată ca problematică și nu poate fi planificată"
+            )
+
+        earliest_day, latest_day = _get_order_planning_window(order)
+
+        if planned_date < earliest_day or planned_date > latest_day:
+            raise ValueError(
+                f"Comanda {order.order_ref} nu este eligibilă pentru data trip-ului. "
+                f"Data trip-ului: {planned_date}. "
+                f"Interval eligibil comandă: {earliest_day} - {latest_day}"
+            )
+
+        if order.pickup_lat is None or order.pickup_lon is None:
+            pickup_address = _build_order_address_for_geocoding(order, "pickup")
+            result = geocode_with_components(pickup_address)
+
+            if not result:
+                raise ValueError(
+                    f"Comanda {order.order_ref} nu poate fi planificată deoarece "
+                    "adresa de pickup nu a putut fi geocodată"
+                )
+
+            order.pickup_lat = result["lat"]
+            order.pickup_lon = result["lon"]
+            order.pickup_county = result.get("county") or order.pickup_county
+            order.pickup_city = result.get("city") or order.pickup_city
+            order.pickup_street = result.get("street") or order.pickup_street
+            order.pickup_number = result.get("number") or order.pickup_number
+
+        if order.delivery_lat is None or order.delivery_lon is None:
+            delivery_address = _build_order_address_for_geocoding(order, "delivery")
+            result = geocode_with_components(delivery_address)
+
+            if not result:
+                raise ValueError(
+                    f"Comanda {order.order_ref} nu poate fi planificată deoarece "
+                    "adresa de livrare nu a putut fi geocodată"
+                )
+
+            order.delivery_lat = result["lat"]
+            order.delivery_lon = result["lon"]
+            order.delivery_county = result.get("county") or order.delivery_county
+            order.delivery_city = result.get("city") or order.delivery_city
+            order.delivery_street = result.get("street") or order.delivery_street
+            order.delivery_number = result.get("number") or order.delivery_number
+
+        if float(order.kg) > float(vehicle.capacity_kg):
+            raise ValueError(
+                f"Comanda {order.order_ref} nu poate fi planificată: greutatea "
+                f"({float(order.kg):.2f} kg) depășește capacitatea vehiculului "
+                f"({float(vehicle.capacity_kg):.2f} kg)"
+            )
+
+        if float(order.m3) > float(vehicle.capacity_m3):
+            raise ValueError(
+                f"Comanda {order.order_ref} nu poate fi planificată: volumul "
+                f"({float(order.m3):.2f} m³) depășește capacitatea vehiculului "
+                f"({float(vehicle.capacity_m3):.2f} m³)"
+            )
+
+        ensure_order_service_times(db, order)
+        ordered_orders.append(order)
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+
+    if not company:
+        raise ValueError("Compania nu a fost găsită")
+
+    depot_lat, depot_lon = _ensure_company_depot_coords(db, company)
+
+    depot_start_seconds = time_to_seconds(driver.shift_start) if driver.shift_start else 5 * 3600
+
+    try:
+        route_result = _solve_orders_for_vehicle(
+            db=db,
+            orders=ordered_orders,
+            vehicle=vehicle,
+            depot_lat=depot_lat,
+            depot_lon=depot_lon,
+            depot_start_seconds=depot_start_seconds,
+        )
+
+    except ValueError as e:
+        raise ValueError(
+            "Trip-ul ad-hoc nu poate fi creat. "
+            f"Motiv: {str(e)}"
+        )
+
+    solver_result = route_result["solver_result"]
+    optimized_route = solver_result["route"]
+    solver_arrival_times = solver_result.get("arrival_times", {})
+    total_km = route_result["total_km"]
+    total_minutes = route_result["total_minutes"]
+
+    trip = Trip(
+        company_id=company_id,
+        driver_id=driver.id,
+        vehicle_id=vehicle.id,
+        planning_session_id=session.id,
+        planned_date=planned_date,
+        status=TripStatusEnum.PROPOSED,
+        planned_km=round(total_km, 1),
+        planned_duration_min=round(total_minutes),
+    )
+
+    db.add(trip)
+    db.flush()
+
+    sequence = 1
+    num_orders = len(ordered_orders)
+    stops_preview = []
+
+    for route_idx in optimized_route:
+        if route_idx == 0:
+            continue
+
+        if route_idx <= num_orders:
+            order_idx = route_idx - 1
+            stop_type = StopTypeEnum.PICKUP
+        else:
+            order_idx = route_idx - 1 - num_orders
+            stop_type = StopTypeEnum.DELIVERY
+
+        if order_idx >= num_orders:
+            continue
+
+        order = ordered_orders[order_idx]
+
+        eta = None
+
+        if solver_arrival_times and route_idx in solver_arrival_times:
+            arrival_seconds = solver_arrival_times[route_idx]
+
+            eta = datetime(
+                planned_date.year,
+                planned_date.month,
+                planned_date.day,
+                tzinfo=LOCAL_TZ,
+            ) + timedelta(seconds=arrival_seconds)
+
+        trip_stop = TripStop(
+            trip_id=trip.id,
+            order_id=order.id,
+            sequence=sequence,
+            stop_type=stop_type,
+            eta_planned=eta,
+            status=StopStatusEnum.PENDING,
+        )
+
+        db.add(trip_stop)
+
+        stops_preview.append({
+            "sequence": sequence,
+            "order_id": str(order.id),
+            "order_ref": order.order_ref,
+            "stop_type": stop_type.value,
+            "eta_planned": eta.isoformat() if eta else None,
+        })
+
+        sequence += 1
+
+    db.flush()
+
+    db.expire(trip, ["stops"])
+
+    try:
+        _validate_reoptimized_trip(
+            trip=trip,
+            orders=ordered_orders,
+            solver_result=solver_result,
+        )
+
+        _check_driver_trip_overlap(
+            db=db,
+            trip=trip,
+            new_driver_id=driver.id,
+            company_id=company_id,
+        )
+
+    except ValueError as e:
+        raise ValueError(
+            "Trip-ul ad-hoc nu poate fi creat. "
+            f"Motiv: {str(e)}"
+        )
+
+    for order in ordered_orders:
+        order.status = OrderStatusEnum.PLANNED
+        order.assigned_delivery_date = planned_date
+
+    db.commit()
+    db.refresh(trip)
+
+    return {
+        "trip_id": str(trip.id),
+        "planning_session_id": str(session.id),
+        "planned_date": str(trip.planned_date),
+        "status": trip.status.value,
+        "driver_id": str(driver.id),
+        "vehicle_id": str(vehicle.id),
+        "vehicle_plate": vehicle.plate,
+        "planned_km": float(trip.planned_km),
+        "planned_duration_min": trip.planned_duration_min,
+        "total_orders": len(ordered_orders),
+        "total_stops": len(stops_preview),
+        "orders": [
+            {
+                "order_id": str(order.id),
+                "order_ref": order.order_ref,
+                "status": order.status.value,
+                "assigned_delivery_date": str(order.assigned_delivery_date),
+            }
+            for order in ordered_orders
+        ],
+        "stops": stops_preview,
+        "message": "Trip-ul ad-hoc a fost creat cu succes ca PROPOSED.",
+    }
+
+
 def run_planning(
     db: Session,
     company_id: uuid.UUID,
@@ -2379,6 +2826,16 @@ def run_planning(
         date_start = planned_date
     if date_end is None:
         date_end = planned_date
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+
+    if not company:
+        return {"error": "Compania nu a fost găsită"}
+
+    try:
+        depot_lat, depot_lon = _ensure_company_depot_coords(db, company)
+    except ValueError as e:
+        return {"error": str(e)}
 
     day_dates = []
     current_day = date_start
@@ -2414,20 +2871,30 @@ def run_planning(
     # PAS 2: Geocodare (cache)
     for order in eligible_orders:
         if order.pickup_lat is None or order.pickup_lon is None:
-            result = geocode(order.address_pickup)
+            pickup_address = _build_order_address_for_geocoding(order, "pickup")
+            result = geocode_with_components(pickup_address)
             if result:
                 order.pickup_lat = result["lat"]
                 order.pickup_lon = result["lon"]
+                order.pickup_county = result.get("county") or order.pickup_county
+                order.pickup_city = result.get("city") or order.pickup_city
+                order.pickup_street = result.get("street") or order.pickup_street
+                order.pickup_number = result.get("number") or order.pickup_number
             else:
-                print(f"Nu am putut geocoda pickup: {order.address_pickup}")
+                print(f"Nu am putut geocoda pickup: {pickup_address}")
 
         if order.delivery_lat is None or order.delivery_lon is None:
-            result = geocode(order.address_delivery)
+            delivery_address = _build_order_address_for_geocoding(order, "delivery")
+            result = geocode_with_components(delivery_address)
             if result:
                 order.delivery_lat = result["lat"]
                 order.delivery_lon = result["lon"]
+                order.delivery_county = result.get("county") or order.delivery_county
+                order.delivery_city = result.get("city") or order.delivery_city
+                order.delivery_street = result.get("street") or order.delivery_street
+                order.delivery_number = result.get("number") or order.delivery_number
             else:
-                print(f"Nu am putut geocoda delivery: {order.address_delivery}")
+                print(f"Nu am putut geocoda delivery: {delivery_address}")
 
     db.commit()
 
@@ -2528,6 +2995,8 @@ def run_planning(
             planned_date=day_date,
             planning_session_id=planning_session_id,
             dry_run=dry_run,
+            depot_lat=depot_lat,
+            depot_lon=depot_lon,
         )
 
         cluster_debug_by_day.append({

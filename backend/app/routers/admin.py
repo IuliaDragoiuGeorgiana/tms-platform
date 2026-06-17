@@ -7,7 +7,7 @@ from app.models.user import User, RoleEnum
 from app.schemas.auth import InviteUserRequest, UserResponse
 from app.core.security import hash_password, generate_temporary_password
 from app.dependencies import require_roles
-from app.services.email_service import send_temporary_password_email
+from app.services.email_service import send_temporary_password_email, send_client_approved_email
 from app.models.company import Company
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -154,6 +154,12 @@ def approve_user(
     user.is_approved = True
     db.commit()
     db.refresh(user)
+
+    # Send approval email to client
+    send_client_approved_email(
+        to_email=user.email,
+        to_name=user.full_name or user.email,
+    )
 
     return user
 

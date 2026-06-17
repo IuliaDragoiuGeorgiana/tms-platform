@@ -13,6 +13,7 @@ from app.services.planning_service import (
     change_trip_vehicle,
     remove_order_from_trip,
     add_order_to_trip,
+    create_ad_hoc_trip,
 )
 from app.schemas.planning import (
     EligibleOrdersRequest,
@@ -22,6 +23,7 @@ from app.schemas.planning import (
     ChangeDriverRequest,
     ChangeVehicleRequest,
     AddOrderToTripRequest,
+    CreateAdHocTripRequest,
 )
 from app.models.order import Order, OrderStatusEnum
 from app.models.planning_session import PlanningStrategyEnum, PlanningSession, PlanningStatusEnum
@@ -160,6 +162,14 @@ def get_eligible_orders(
             client_name=client_name,
             address_pickup=order.address_pickup,
             address_delivery=order.address_delivery,
+            pickup_county=order.pickup_county,
+            pickup_city=order.pickup_city,
+            pickup_street=order.pickup_street,
+            pickup_number=order.pickup_number,
+            delivery_county=order.delivery_county,
+            delivery_city=order.delivery_city,
+            delivery_street=order.delivery_street,
+            delivery_number=order.delivery_number,
             kg=float(order.kg),
             m3=float(order.m3),
             type_marfa=type_marfa_value,
@@ -515,6 +525,51 @@ def add_order_to_trip_endpoint(
             trip_id=trip_id,
             order_id=body.order_id,
             company_id=current_user.company_id,
+        )
+        return result
+
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.post("/sessions/{session_id}/trips/ad-hoc", status_code=status.HTTP_201_CREATED)
+def create_ad_hoc_trip_endpoint(
+    session_id: uuid.UUID,
+    body: CreateAdHocTripRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("DISPECER", "MANAGER")),
+):
+    """
+    Creează un trip nou ad-hoc într-o sesiune PROPOSED.
+
+    Dispecerul alege manual:
+    - data;
+    - șoferul;
+    - vehiculul;
+    - comenzile PENDING.
+
+    Sistemul validează și optimizează ruta.
+
+    Validări complete:
+    - Sesiunea PROPOSED și în interval corect;
+    - Șoferul disponibil și în compania dispecerului;
+    - Vehiculul disponibil și în compania dispecerului;
+    - Comenzile PENDING, neproblematice, eligibile;
+    - Ruta fezabilă și fără overlap cu alte trip-uri ale șoferului.
+    """
+    try:
+        result = create_ad_hoc_trip(
+            db=db,
+            session_id=session_id,
+            company_id=current_user.company_id,
+            planned_date=body.planned_date,
+            driver_id=body.driver_id,
+            vehicle_id=body.vehicle_id,
+            order_ids=body.order_ids,
         )
         return result
 

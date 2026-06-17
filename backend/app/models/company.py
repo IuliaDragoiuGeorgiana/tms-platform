@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import String, Boolean, Integer, Enum
+from sqlalchemy import String, Boolean, Integer, Enum, Numeric
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, UUIDPrimaryKey, FullTimestampMixin
@@ -22,6 +22,13 @@ class Company(UUIDPrimaryKey, FullTimestampMixin, Base):
     max_vehicles: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     max_users: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
     settings: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+
+    depot_county: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    depot_city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    depot_street: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    depot_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    depot_lat: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
+    depot_lon: Mapped[float | None] = mapped_column(Numeric(10, 6), nullable=True)
 
     # Relationships
     users = relationship("User", back_populates="company", lazy="selectin")

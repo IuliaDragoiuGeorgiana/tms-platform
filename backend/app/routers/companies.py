@@ -17,6 +17,7 @@ from app.schemas.company import (
     CompanyStatsResponse,
 )
 from app.dependencies import require_roles
+from app.services.ors_service import geocode_with_components
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
 
@@ -45,10 +46,41 @@ def create_company(
         plan=data.plan,
         max_vehicles=data.max_vehicles,
         max_users=data.max_users,
+        depot_county=data.depot_county,
+        depot_city=data.depot_city,
+        depot_street=data.depot_street,
+        depot_number=data.depot_number,
         is_active=True,  # Companiile noi sunt active implicit
     )
 
     db.add(new_company)
+    db.flush()
+
+    # Geocodează depot dacă sunt date disponibile.
+    # `depot_county` înseamnă județul garajului, nu țara.
+    if new_company.depot_street or new_company.depot_city or new_company.depot_county:
+        depot_address_parts = [
+            new_company.depot_street,
+            new_company.depot_number,
+            new_company.depot_city,
+            new_company.depot_county,
+        ]
+        clean_parts = [str(p).strip() for p in depot_address_parts if p and str(p).strip()]
+
+        if clean_parts:
+            clean_parts.append("Romania")
+            depot_address = ", ".join(clean_parts)
+
+            geocoded = geocode_with_components(depot_address)
+
+            if geocoded:
+                new_company.depot_lat = geocoded.get("lat")
+                new_company.depot_lon = geocoded.get("lon")
+                new_company.depot_county = geocoded.get("county") or new_company.depot_county
+                new_company.depot_city = geocoded.get("city") or new_company.depot_city
+                new_company.depot_street = geocoded.get("street") or new_company.depot_street
+                new_company.depot_number = geocoded.get("number") or new_company.depot_number
+
     db.commit()
     db.refresh(new_company)
 
@@ -121,6 +153,7 @@ def update_company(
     """
     Actualizează o companie.
     Permite schimbarea numelui, statusului (is_active), planului și limitelor.
+    Dacă sunt actualizate câmpurile depot, se geocodează automat adresa și se extrag componente.
     """
     company = db.query(Company).filter(Company.id == company_id).first()
 
@@ -133,8 +166,41 @@ def update_company(
     # Actualizează doar câmpurile trimise
     update_data = data.model_dump(exclude_unset=True)
 
+    # Verifică dacă sunt actualizate câmpurile depot.
+    # `depot_county` este județul (ex: Timiș, Hunedoara), păstrat ca `county`
+    # pentru terminologia API în engleză.
+    depot_fields = {"depot_county", "depot_city", "depot_street", "depot_number"}
+    has_depot_update = any(f in update_data for f in depot_fields)
+
+    # Actualizează câmpurile
     for field, value in update_data.items():
         setattr(company, field, value)
+
+    # Dacă sunt actualizate câmpurile depot, geocodează adresa
+    if has_depot_update:
+        company.depot_lat = None
+        company.depot_lon = None
+
+        depot_address_parts = [
+            company.depot_street,
+            company.depot_number,
+            company.depot_city,
+            company.depot_county,
+        ]
+        clean_parts = [str(p).strip() for p in depot_address_parts if p and str(p).strip()]
+
+        if clean_parts:
+            clean_parts.append("Romania")
+            depot_address = ", ".join(clean_parts)
+
+            geocoded = geocode_with_components(depot_address)
+            if geocoded:
+                company.depot_lat = geocoded.get("lat")
+                company.depot_lon = geocoded.get("lon")
+                company.depot_county = geocoded.get("county") or company.depot_county
+                company.depot_city = geocoded.get("city") or company.depot_city
+                company.depot_street = geocoded.get("street") or company.depot_street
+                company.depot_number = geocoded.get("number") or company.depot_number
 
     db.commit()
     db.refresh(company)

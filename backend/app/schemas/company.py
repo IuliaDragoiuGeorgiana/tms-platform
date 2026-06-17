@@ -9,6 +9,10 @@ class CreateCompanyRequest(BaseModel):
     plan: str = "FREE"
     max_vehicles: int = 10
     max_users: int = 20
+    depot_county: str | None = None
+    depot_city: str | None = None
+    depot_street: str | None = None
+    depot_number: str | None = None
 
     @field_validator("slug")
     @classmethod
@@ -24,6 +28,10 @@ class UpdateCompanyRequest(BaseModel):
     plan: str | None = None
     max_vehicles: int | None = None
     max_users: int | None = None
+    depot_county: str | None = None
+    depot_city: str | None = None
+    depot_street: str | None = None
+    depot_number: str | None = None
 
 
 class CompanyResponse(BaseModel):
@@ -34,6 +42,12 @@ class CompanyResponse(BaseModel):
     plan: str
     max_vehicles: int | None
     max_users: int | None
+    depot_county: str | None = None
+    depot_city: str | None = None
+    depot_street: str | None = None
+    depot_number: str | None = None
+    depot_lat: float | None = None
+    depot_lon: float | None = None
     managers_count: int = 0
     users_count: int = 0
     dispatchers_count: int = 0

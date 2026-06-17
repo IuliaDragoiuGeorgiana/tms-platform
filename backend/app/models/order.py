@@ -1,4 +1,5 @@
 import enum
+from datetime import date, time
 from sqlalchemy import String, Integer, Enum, ForeignKey, Date, Time, Text, Numeric, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -50,11 +51,19 @@ class Order(UUIDPrimaryKey, FullTimestampMixin, Base):
     )
     # Adresa de PRELUARE (de unde ia marfa)
     address_pickup: Mapped[str] = mapped_column(Text, nullable=False)
+    pickup_county: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    pickup_city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    pickup_street: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    pickup_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     pickup_lat: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     pickup_lon: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
 
     # Adresa de LIVRARE (unde duce marfa)
     address_delivery: Mapped[str] = mapped_column(Text, nullable=False)
+    delivery_county: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    delivery_city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    delivery_street: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    delivery_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     delivery_lat: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     delivery_lon: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     kg: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
@@ -77,19 +86,19 @@ class Order(UUIDPrimaryKey, FullTimestampMixin, Base):
     )
 
     # Multi-day planning fields
-    delivery_deadline: Mapped[str] = mapped_column(Date, nullable=False)
-    earliest_delivery_date: Mapped[str | None] = mapped_column(Date, nullable=True)
+    delivery_deadline: Mapped[date] = mapped_column(Date, nullable=False)
+    earliest_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     flexibility_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    assigned_delivery_date: Mapped[str | None] = mapped_column(Date, nullable=True)
+    assigned_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Time window
     # Time window PICKUP (când poate fi preluată marfa)
-    pickup_time_window_start: Mapped[str | None] = mapped_column(Time, nullable=True)
-    pickup_time_window_end: Mapped[str | None] = mapped_column(Time, nullable=True)
+    pickup_time_window_start: Mapped[time | None] = mapped_column(Time, nullable=True)
+    pickup_time_window_end: Mapped[time | None] = mapped_column(Time, nullable=True)
 
     # Time window DELIVERY (când trebuie livrată)
-    delivery_time_window_start: Mapped[str | None] = mapped_column(Time, nullable=True)
-    delivery_time_window_end: Mapped[str | None] = mapped_column(Time, nullable=True)
+    delivery_time_window_start: Mapped[time | None] = mapped_column(Time, nullable=True)
+    delivery_time_window_end: Mapped[time | None] = mapped_column(Time, nullable=True)
     status: Mapped[OrderStatusEnum] = mapped_column(
         Enum(OrderStatusEnum), default=OrderStatusEnum.PENDING, nullable=False
     )
@@ -97,8 +106,6 @@ class Order(UUIDPrimaryKey, FullTimestampMixin, Base):
     source: Mapped[OrderSourceEnum] = mapped_column(
         Enum(OrderSourceEnum), default=OrderSourceEnum.PORTAL, nullable=False
     )
-    attempts_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    special_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempts_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     special_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
 

@@ -39,3 +39,17 @@ ORS_BASE_URL = os.getenv(
     "ORS_BASE_URL",
     "https://api.openrouteservice.org"
 )
+
+# ==========================================
+# Email Settings (SMTP)
+# ==========================================
+SMTP_HOST = os.getenv("SMTP_HOST", "localhost")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL")
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME")
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "True").lower() == "true"
+
+# Frontend base URL for email links
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:4200")

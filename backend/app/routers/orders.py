@@ -5,6 +5,7 @@ import secrets
 from datetime import date
 from app.services.service_time_service import ensure_order_service_times
 from app.services.order_feasibility_service import check_order_operational_warnings
+from app.services.ors_service import geocode_with_components
 
 from app.database import get_db
 from app.models.order import Order, MarfaTypeEnum, PriorityEnum, OrderStatusEnum, OrderSourceEnum, ServiceTimeSourceEnum
@@ -28,6 +29,87 @@ def generate_order_ref() -> str:
 
 def generate_tracking_token() -> str:
     return secrets.token_urlsafe(16)
+
+
+def build_geocoding_address(
+    address: str,
+    county: str | None = None,
+    city: str | None = None,
+    street: str | None = None,
+    number: str | None = None,
+) -> str:
+    """
+    Construiește o adresă structurată pentru geocodare, folosind componente dacă sunt disponibile.
+
+    În model/API folosim `county` ca traducere tehnică pentru județ.
+
+    Prioritate:
+    1. Dacă au componentele structurate, construiește din ele (mai precis)
+    2. Altfel, folosește textul adresei libere
+
+    Formatul returnat: "Strada X, Număr Y, Oraș, Județ, Romania"
+    """
+    parts = []
+
+    if street:
+        parts.append(str(street).strip())
+    if number:
+        parts.append(str(number).strip())
+    if city:
+        parts.append(str(city).strip())
+    if county:
+        parts.append(str(county).strip())
+
+    if parts:
+        parts.append("Romania")
+        return ", ".join(parts)
+
+    return address
+
+
+def geocode_and_populate_address(
+    order: Order,
+    address: str,
+    address_type: str,
+    county: str | None = None,
+    city: str | None = None,
+    street: str | None = None,
+    number: str | None = None,
+) -> None:
+    """
+    Geocodează adresa și populează câmpurile structurate (județ, oraș, stradă, număr) și coordonate.
+
+    `county` înseamnă județ (ex: Timiș, Hunedoara, Cluj), nu țară.
+
+    address_type: "pickup" sau "delivery"
+
+    Strategie:
+    1. Construiește o adresă precisă din componente disponibile
+    2. Geocodează și extrage componente structurate
+    3. Completează componentele care lipsesc din rezultatul geocodării
+    """
+    if not address or not address.strip():
+        return
+
+    # Construiește adresă mai precisă din componente dacă sunt disponibile
+    geocoding_query = build_geocoding_address(address, county, city, street, number)
+
+    geocoded = geocode_with_components(geocoding_query)
+
+    if geocoded:
+        lat_field = f"{address_type}_lat"
+        lon_field = f"{address_type}_lon"
+        county_field = f"{address_type}_county"
+        city_field = f"{address_type}_city"
+        street_field = f"{address_type}_street"
+        number_field = f"{address_type}_number"
+
+        setattr(order, lat_field, geocoded.get("lat"))
+        setattr(order, lon_field, geocoded.get("lon"))
+        setattr(order, county_field, county or geocoded.get("county"))
+        setattr(order, city_field, city or geocoded.get("city"))
+        setattr(order, street_field, street or geocoded.get("street"))
+        setattr(order, number_field, number or geocoded.get("number"))
 
 
 def check_order_planning_feasibility(order: Order, db: Session) -> list[str]:
@@ -216,11 +298,19 @@ def create_order(
 
         # Pickup
         address_pickup=data.address_pickup,
+        pickup_county=data.pickup_county,
+        pickup_city=data.pickup_city,
+        pickup_street=data.pickup_street,
+        pickup_number=data.pickup_number,
         pickup_time_window_start=data.pickup_time_window_start,
         pickup_time_window_end=data.pickup_time_window_end,
 
         # Delivery
         address_delivery=data.address_delivery,
+        delivery_county=data.delivery_county,
+        delivery_city=data.delivery_city,
+        delivery_street=data.delivery_street,
+        delivery_number=data.delivery_number,
         delivery_time_window_start=data.delivery_time_window_start,
         delivery_time_window_end=data.delivery_time_window_end,
 
@@ -241,6 +331,26 @@ def create_order(
         source=OrderSourceEnum.PORTAL,
         attempts_count=0,
         special_instructions=data.special_instructions,
+    )
+
+    # Geocodează adresele
+    geocode_and_populate_address(
+        new_order,
+        data.address_pickup,
+        "pickup",
+        county=data.pickup_county,
+        city=data.pickup_city,
+        street=data.pickup_street,
+        number=data.pickup_number,
+    )
+    geocode_and_populate_address(
+        new_order,
+        data.address_delivery,
+        "delivery",
+        county=data.delivery_county,
+        city=data.delivery_city,
+        street=data.delivery_street,
+        number=data.delivery_number,
     )
 
     ensure_order_service_times(db, new_order)
@@ -310,14 +420,26 @@ def update_order(
         )
 
     update_data = data.model_dump(exclude_unset=True)
-    pickup_address_changed = (
-        "address_pickup" in update_data
-        and update_data["address_pickup"] != order.address_pickup
-    )
-    delivery_address_changed = (
-        "address_delivery" in update_data
-        and update_data["address_delivery"] != order.address_delivery
-    )
+
+    # Verifică dacă se schimbă adresa de pickup (text sau componente structurate)
+    pickup_geocode_fields = {
+        "address_pickup",
+        "pickup_county",
+        "pickup_city",
+        "pickup_street",
+        "pickup_number",
+    }
+    pickup_address_changed = any(field in update_data for field in pickup_geocode_fields)
+
+    # Verifică dacă se schimbă adresa de delivery (text sau componente structurate)
+    delivery_geocode_fields = {
+        "address_delivery",
+        "delivery_county",
+        "delivery_city",
+        "delivery_street",
+        "delivery_number",
+    }
+    delivery_address_changed = any(field in update_data for field in delivery_geocode_fields)
 
     if "delivery_deadline" in update_data:
         if update_data["delivery_deadline"] < date.today():
@@ -338,9 +460,29 @@ def update_order(
         order.pickup_lat = None
         order.pickup_lon = None
 
+        geocode_and_populate_address(
+            order,
+            order.address_pickup,
+            "pickup",
+            county=order.pickup_county,
+            city=order.pickup_city,
+            street=order.pickup_street,
+            number=order.pickup_number,
+        )
+
     if delivery_address_changed:
         order.delivery_lat = None
         order.delivery_lon = None
+
+        geocode_and_populate_address(
+            order,
+            order.address_delivery,
+            "delivery",
+            county=order.delivery_county,
+            city=order.delivery_city,
+            street=order.delivery_street,
+            number=order.delivery_number,
+        )
 
     if order.earliest_delivery_date and order.earliest_delivery_date > order.delivery_deadline:
         raise HTTPException(

@@ -92,9 +92,19 @@ class EligibleOrderSummary(BaseModel):
     order_ref: str
     client_name: str | None = None
 
-    # Adrese
+    # Adrese - text
     address_pickup: str
     address_delivery: str
+
+    # Adrese - structurate
+    pickup_county: str | None = None
+    pickup_city: str | None = None
+    pickup_street: str | None = None
+    pickup_number: str | None = None
+    delivery_county: str | None = None
+    delivery_city: str | None = None
+    delivery_street: str | None = None
+    delivery_number: str | None = None
 
     # Marfă
     kg: float
@@ -163,3 +173,26 @@ class AddOrderToTripRequest(BaseModel):
     Dispecerul trimite UUID-ul comenzii care trebuie adăugată.
     """
     order_id: uuid.UUID
+
+
+class CreateAdHocTripRequest(BaseModel):
+    """
+    Schema pentru crearea unui trip nou ad-hoc într-o sesiune PROPOSED.
+
+    Dispecerul alege manual:
+    - data trip-ului;
+    - șoferul;
+    - vehiculul;
+    - una sau mai multe comenzi PENDING.
+    """
+    planned_date: date
+    driver_id: uuid.UUID
+    vehicle_id: uuid.UUID
+    order_ids: list[uuid.UUID]
+
+    @field_validator("order_ids")
+    @classmethod
+    def order_ids_not_empty(cls, v):
+        if not v:
+            raise ValueError("Trebuie selectată cel puțin o comandă")
+        return v

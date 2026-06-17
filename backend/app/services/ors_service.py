@@ -1,11 +1,14 @@
 """
 Serviciu pentru comunicarea cu OpenRouteService API.
-Două funcții principale:
+Funcții:
 1. geocode() — transformă adresa text în coordonate GPS
-2. get_distance_matrix() — calculează distanțele și timpii între toate perechile de puncte
+2. reverse_geocode() — transformă coordonate GPS în adresă structurată
+3. geocode_with_components() — geocodează și extrage componente (județ, oraș, stradă, număr)
+4. get_distance_matrix() — calculează distanțele și timpii între toate perechile de puncte
 """
 import requests
 from app.core.config import ORS_API_KEY, ORS_BASE_URL
+from typing import Optional
 
 
 def geocode(address: str) -> dict | None:
@@ -45,6 +48,91 @@ def geocode(address: str) -> dict | None:
         return None
 
 
+def reverse_geocode(lat: float, lon: float) -> dict | None:
+    """
+    Transformă coordonate GPS în adresă structurată.
+
+    Returnează dict cu componente: {
+        "county": "Cluj",
+        "city": "Cluj-Napoca",
+        "street": "Strada Memorandumului",
+        "number": "21",
+        "formatted": "...",
+    }
+
+    Pentru România, mapare de câmpuri:
+    - county: county, region, state
+    - city: locality, localadmin, city
+    - street: street, name
+    - number: housenumber
+    """
+    url = f"{ORS_BASE_URL}/geocode/reverse"
+    params = {
+        "api_key": ORS_API_KEY,
+        "point.lon": lon,
+        "point.lat": lat,
+        "boundary.country": "RO",
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("features"):
+            feature = data["features"][0]
+            props = feature.get("properties", {})
+
+            return {
+                "county": props.get("county") or props.get("region") or props.get("state"),
+                "city": (
+                    props.get("locality")
+                    or props.get("localadmin")
+                    or props.get("city")
+                    or props.get("county")
+                ),
+                "street": props.get("street") or props.get("name"),
+                "number": props.get("housenumber"),
+                "formatted": props.get("label") or props.get("name") or "",
+            }
+        return None
+
+    except requests.RequestException as e:
+        print(f"Eroare reverse geocodare pentru ({lat}, {lon}): {e}")
+        return None
+
+
+def geocode_with_components(address: str) -> dict | None:
+    """
+    Geocodează o adresă și extrage componente structurate (județ, oraș, stradă, număr).
+
+    Returnează dict cu: {
+        "lat": 46.7712,
+        "lon": 23.5896,
+        "county": "Cluj",
+        "city": "Cluj-Napoca",
+        "street": "Strada Memorandumului",
+        "number": "21",
+    }
+    """
+    # Getter les coordonate
+    coords = geocode(address)
+    if not coords:
+        return None
+
+    # Cu reverse geocoding, obținem componente structurate
+    components = reverse_geocode(coords["lat"], coords["lon"])
+
+    if components:
+        return {
+            **coords,
+            **components,
+        }
+
+    # Dacă reverse geocoding eșuează, returnez doar coordonatele
+    return coords
+
+
 def geocode_batch(addresses: list[str]) -> list[dict | None]:
     """
     Geocodează o listă de adrese.
@@ -53,6 +141,18 @@ def geocode_batch(addresses: list[str]) -> list[dict | None]:
     results = []
     for address in addresses:
         result = geocode(address)
+        results.append(result)
+    return results
+
+
+def geocode_batch_with_components(addresses: list[str]) -> list[dict | None]:
+    """
+    Geocodează o listă de adrese cu componente structurate.
+    Returnează o listă de {lat, lon, county, city, street, number} sau None.
+    """
+    results = []
+    for address in addresses:
+        result = geocode_with_components(address)
         results.append(result)
     return results
 

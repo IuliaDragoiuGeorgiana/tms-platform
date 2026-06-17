@@ -10,11 +10,19 @@ class CreateOrderRequest(BaseModel):
     """
     # Adresa de PRELUARE
     address_pickup: str                          # "Str. Fabricii 5, București"
+    pickup_county: str | None = None             # Județ (opțional, se extrage din adresă)
+    pickup_city: str | None = None               # Oraș
+    pickup_street: str | None = None             # Stradă
+    pickup_number: str | None = None             # Număr
     pickup_time_window_start: time | None = None # Când poate fi preluată (start)
     pickup_time_window_end: time | None = None   # Când poate fi preluată (end)
 
     # Adresa de LIVRARE
     address_delivery: str                        # "Str. Victoriei 12, Cluj-Napoca"
+    delivery_county: str | None = None           # Județ (opțional, se extrage din adresă)
+    delivery_city: str | None = None             # Oraș
+    delivery_street: str | None = None           # Stradă
+    delivery_number: str | None = None           # Număr
     delivery_time_window_start: time | None = None
     delivery_time_window_end: time | None = None
 
@@ -113,9 +121,17 @@ class MarkOrderProblematicRequest(BaseModel):
 
 class UpdateOrderRequest(BaseModel):
     address_pickup: str | None = None
+    pickup_county: str | None = None
+    pickup_city: str | None = None
+    pickup_street: str | None = None
+    pickup_number: str | None = None
     pickup_time_window_start: time | None = None
     pickup_time_window_end: time | None = None
     address_delivery: str | None = None
+    delivery_county: str | None = None
+    delivery_city: str | None = None
+    delivery_street: str | None = None
+    delivery_number: str | None = None
     delivery_time_window_start: time | None = None
     delivery_time_window_end: time | None = None
     kg: float | None = None
@@ -207,6 +223,10 @@ class OrderResponse(BaseModel):
 
     # Pickup
     address_pickup: str
+    pickup_county: str | None
+    pickup_city: str | None
+    pickup_street: str | None
+    pickup_number: str | None
     pickup_lat: float | None
     pickup_lon: float | None
     pickup_time_window_start: time | None
@@ -214,6 +234,10 @@ class OrderResponse(BaseModel):
 
     # Delivery
     address_delivery: str
+    delivery_county: str | None
+    delivery_city: str | None
+    delivery_street: str | None
+    delivery_number: str | None
     delivery_lat: float | None
     delivery_lon: float | None
     delivery_time_window_start: time | None

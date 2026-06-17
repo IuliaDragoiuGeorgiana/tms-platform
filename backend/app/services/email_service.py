@@ -1,9 +1,113 @@
 """
-Serviciu email pentru TMS.
+Email service for TMS Platform.
 
-În etapa curentă, emailurile sunt afișate în terminal pentru testare.
-Ulterior, acest serviciu va fi conectat la un provider real de email.
+Uses SMTP to send HTML emails with templates.
+Configuration is loaded from environment variables.
 """
+
+import os
+import logging
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime
+from pathlib import Path
+
+from jinja2 import Environment, FileSystemLoader
+
+from app.core.config import (
+    SMTP_HOST,
+    SMTP_PORT,
+    SMTP_USER,
+    SMTP_PASSWORD,
+    SMTP_FROM_EMAIL,
+    SMTP_FROM_NAME,
+    SMTP_USE_TLS,
+    FRONTEND_BASE_URL,
+)
+
+logger = logging.getLogger(__name__)
+
+# Template directory path
+TEMPLATE_DIR = Path(__file__).parent.parent / "email_templates"
+
+# Jinja2 environment
+jinja_env = Environment(
+    loader=FileSystemLoader(TEMPLATE_DIR),
+    autoescape=True,
+)
+
+
+def render_template(template_name: str, context: dict) -> str:
+    """
+    Render a Jinja2 template with the given context.
+
+    Args:
+        template_name: Name of the template file (e.g., 'temporary_password.html')
+        context: Dictionary with template variables
+
+    Returns:
+        Rendered HTML string
+    """
+    # Add global context variables
+    context.setdefault("current_year", datetime.now().year)
+    context.setdefault("frontend_url", FRONTEND_BASE_URL)
+
+    template = jinja_env.get_template(template_name)
+    return template.render(context)
+
+
+def send_email(
+    to_email: str,
+    to_name: str,
+    subject: str,
+    html_content: str,
+) -> bool:
+    """
+    Send an HTML email using SMTP.
+
+    Args:
+        to_email: Recipient email address
+        to_name: Recipient name
+        subject: Email subject
+        html_content: HTML content of the email
+
+    Returns:
+        True if email was sent successfully, False otherwise
+    """
+    try:
+        # Create message
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"{SMTP_FROM_NAME} <{SMTP_FROM_EMAIL}>"
+        msg["To"] = f"{to_name} <{to_email}>"
+
+        # Attach HTML part
+        html_part = MIMEText(html_content, "html", "utf-8")
+        msg.attach(html_part)
+
+        # Send email
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            if SMTP_USE_TLS:
+                server.starttls()
+
+            if SMTP_USER and SMTP_PASSWORD:
+                server.login(SMTP_USER, SMTP_PASSWORD)
+
+            server.send_message(msg)
+
+        logger.info(f"Email sent successfully to {to_email}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to send email to {to_email}: {str(e)}")
+        # For development: still print to console so we can see the email content
+        print("\n" + "=" * 80)
+        print(f"EMAIL SEND FAILED: {subject}")
+        print(f"Recipient: {to_name} <{to_email}>")
+        print(f"Error: {str(e)}")
+        print("=" * 80 + "\n")
+        return False
 
 
 def send_password_reset_email(
@@ -12,21 +116,31 @@ def send_password_reset_email(
     reset_token: str,
 ) -> bool:
     """
-    Trimite email cu link de resetare parolă.
+    Send password reset email with HTML template.
 
-    Pentru moment, afișează linkul în terminal.
+    Args:
+        to_email: Recipient email address
+        to_name: Recipient full name
+        reset_token: The reset token for the password reset link
+
+    Returns:
+        True if email was sent successfully, False otherwise
     """
-    reset_link = f"http://localhost:4200/reset-password?token={reset_token}"
+    reset_link = f"{FRONTEND_BASE_URL}/reset-password?token={reset_token}"
 
-    print("\n" + "=" * 80)
-    print("EMAIL RESETARE PAROLĂ")
-    print(f"Către: {to_name} <{to_email}>")
-    print("Subiect: Resetare parolă TMS Platform")
-    print(f"Link resetare: {reset_link}")
-    print("Tokenul expiră în 15 minute.")
-    print("=" * 80 + "\n")
+    context = {
+        "user_name": to_name or to_email,
+        "reset_link": reset_link,
+    }
 
-    return True
+    html_content = render_template("password_reset.html", context)
+
+    return send_email(
+        to_email=to_email,
+        to_name=to_name or to_email,
+        subject="🔐 Resetare parolă - TMS Platform",
+        html_content=html_content,
+    )
 
 
 def send_temporary_password_email(
@@ -35,17 +149,61 @@ def send_temporary_password_email(
     temporary_password: str,
 ) -> bool:
     """
-    Trimite email cu parola temporară pentru conturile create/invitate.
+    Send temporary password email for newly invited users.
 
-    Pentru moment, afișează parola în terminal.
-    În versiunea finală, parola nu trebuie afișată în Swagger/frontend.
+    Args:
+        to_email: Recipient email address
+        to_name: Recipient full name
+        temporary_password: The temporary password for first login
+
+    Returns:
+        True if email was sent successfully, False otherwise
     """
-    print("\n" + "=" * 80)
-    print("EMAIL CONT CREAT")
-    print(f"Către: {to_name} <{to_email}>")
-    print("Subiect: Cont creat în TMS Platform")
-    print(f"Parolă temporară: {temporary_password}")
-    print("La prima autentificare, utilizatorul trebuie să schimbe parola.")
-    print("=" * 80 + "\n")
+    login_url = f"{FRONTEND_BASE_URL}/login"
 
-    return True
+    context = {
+        "user_name": to_name or to_email,
+        "email": to_email,
+        "temporary_password": temporary_password,
+        "login_url": login_url,
+    }
+
+    html_content = render_template("temporary_password.html", context)
+
+    return send_email(
+        to_email=to_email,
+        to_name=to_name or to_email,
+        subject="✅ Contul tău a fost creat - TMS Platform",
+        html_content=html_content,
+    )
+
+
+def send_client_approved_email(
+    to_email: str,
+    to_name: str,
+) -> bool:
+    """
+    Send approval email to client after manager approval.
+
+    Args:
+        to_email: Recipient email address
+        to_name: Recipient full name
+
+    Returns:
+        True if email was sent successfully, False otherwise
+    """
+    login_url = f"{FRONTEND_BASE_URL}/login"
+
+    context = {
+        "user_name": to_name or to_email,
+        "login_url": login_url,
+    }
+
+    html_content = render_template("client_approved.html", context)
+
+    return send_email(
+        to_email=to_email,
+        to_name=to_name or to_email,
+        subject="🎉 Contul tău a fost aprobat - TMS Platform",
+        html_content=html_content,
+    )
