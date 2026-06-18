@@ -11,6 +11,7 @@ import { Orders } from './pages/orders/orders';
 import { Clients } from './pages/clients/clients';
 import { Tracking } from './pages/tracking/tracking';
 import { Planning } from './pages/planning/planning';
+import { Trips } from './pages/trips/trips';
 import { superAdminGuard } from './core/guards/super-admin.guard';
 import { guestOnlyGuard } from './core/guards/guest-only.guard';
 import { authGuard } from './core/guards/auth.guard';
@@ -18,6 +19,7 @@ import { managerGuard } from './core/guards/manager.guard';
 import { ordersGuard } from './core/guards/orders.guard';
 import { clientsGuard } from './core/guards/clients.guard';
 import { planningGuard } from './core/guards/planning.guard';
+import { tripsGuard } from './core/guards/trips.guard';
 
 export const routes: Routes = [
   {
@@ -73,6 +75,11 @@ export const routes: Routes = [
     path: 'planning',
     component: Planning,
     canActivate: [planningGuard],
+  },
+  {
+    path: 'trips',
+    component: Trips,
+    canActivate: [tripsGuard],
   },
   {
     path: 'clients',

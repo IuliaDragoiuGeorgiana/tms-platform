@@ -52,5 +52,16 @@ class TripStop(UUIDPrimaryKey, Base):
     # Relationships
     trip = relationship("Trip", back_populates="stops")
     order = relationship("Order", back_populates="trip_stops")
+
+    @property
+    def address(self) -> str | None:
+        if not self.order:
+            return None
+
+        if self.stop_type == StopTypeEnum.PICKUP:
+            return self.order.address_pickup
+
+        return self.order.address_delivery
+
     def __repr__(self) -> str:
         return f"<TripStop #{self.sequence} ({self.status.value})>"

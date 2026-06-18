@@ -17,6 +17,7 @@ export interface EligibleOrderSummary {
   id: string;
   order_ref: string;
   client_name: string | null;
+  status: string;
   address_pickup: string;
   address_delivery: string;
   kg: number;
@@ -135,6 +136,21 @@ export class PlanningService {
     return this.http.patch(
       `${this.apiUrl}/trips/${tripId}/vehicle`,
       { vehicle_id: vehicleId },
+      { headers: this.authService.getAuthHeaders() },
+    );
+  }
+
+  addOrderToTrip(tripId: string, orderId: string): Observable<unknown> {
+    return this.http.post(
+      `${this.apiUrl}/trips/${tripId}/orders`,
+      { order_id: orderId },
+      { headers: this.authService.getAuthHeaders() },
+    );
+  }
+
+  removeOrderFromTrip(tripId: string, orderId: string): Observable<unknown> {
+    return this.http.delete(
+      `${this.apiUrl}/trips/${tripId}/orders/${orderId}`,
       { headers: this.authService.getAuthHeaders() },
     );
   }

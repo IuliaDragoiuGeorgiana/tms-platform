@@ -91,6 +91,7 @@ class EligibleOrderSummary(BaseModel):
     id: uuid.UUID
     order_ref: str
     client_name: str | None = None
+    status: str
 
     # Adrese - text
     address_pickup: str

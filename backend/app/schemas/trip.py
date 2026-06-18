@@ -8,7 +8,9 @@ class TripResponse(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     driver_id: uuid.UUID | None
+    driver_name: str | None = None
     vehicle_id: uuid.UUID | None
+    vehicle_label: str | None = None
     planned_date: date
     status: str
     planned_km: float | None
@@ -27,6 +29,7 @@ class TripStopResponse(BaseModel):
     id: uuid.UUID
     trip_id: uuid.UUID
     order_id: uuid.UUID
+    address: str | None = None
     sequence: int
     stop_type: str
     eta_planned: datetime | None

@@ -1,0 +1,375 @@
+<section class="trips-page">
+  <div class="trips-header">
+    <div>
+      <span class="eyebrow">{{ 'trips.eyebrow' | translate }}</span>
+      <h1>{{ 'trips.title' | translate }}</h1>
+      <p>{{ 'trips.description' | translate }}</p>
+    </div>
+  </div>
+
+  @if (tripsError) {
+  <div class="alert alert-error">{{ tripsError | translate }}</div>
+  }
+
+  <div class="trips-toolbar">
+    <label>
+      <span>{{ 'trips.search_label' | translate }}</span>
+      <input
+        type="search"
+        [value]="searchTerm"
+        [placeholder]="'trips.search_placeholder' | translate"
+        (input)="updateSearch($any($event.target).value)"
+      />
+    </label>
+
+    <label>
+      <span>{{ 'trips.status_filter' | translate }}</span>
+      <select [value]="statusFilter" (change)="updateStatusFilter($any($event.target).value)">
+        <option value="">{{ 'trips.all_statuses' | translate }}</option>
+        @for (status of tripStatuses; track status) {
+        <option [value]="status">{{ getStatusKey(status) | translate }}</option>
+        }
+      </select>
+    </label>
+  </div>
+
+  <div class="trips-layout">
+    <section class="trips-panel">
+      <div class="panel-header">
+        <h2>{{ 'trips.list_title' | translate }}</h2>
+        <span>{{ filteredTrips.length }}</span>
+      </div>
+
+      @if (isLoadingTrips) {
+      <div class="loading-state">
+        <h2>{{ 'trips.loading' | translate }}</h2>
+      </div>
+      } @else {
+      <div class="trip-list">
+        @for (trip of filteredTrips; track trip.id) {
+        <article
+          class="trip-row"
+          [ngClass]="getStatusClass(trip.status)"
+          [class.trip-row-selected]="selectedTrip?.id === trip.id"
+          (click)="selectTrip(trip)"
+        >
+          <div>
+            <strong>{{ trip.planned_date }}</strong>
+            <span>{{ trip.id }}</span>
+          </div>
+
+          <div class="trip-row-meta">
+            <span class="status-badge" [ngClass]="getStatusClass(trip.status)">
+              {{ getStatusKey(trip.status) | translate }}
+            </span>
+            <span>{{ trip.planned_km ?? 0 }} km</span>
+            <span>{{ trip.planned_duration_min ?? 0 }} {{ 'planning.minutes_short' | translate }}</span>
+          </div>
+        </article>
+        } @empty {
+        <div class="empty-state">
+          <p>{{ 'trips.empty' | translate }}</p>
+        </div>
+        }
+      </div>
+      }
+    </section>
+
+    <aside class="trips-panel">
+      <div class="panel-header">
+        <h2>{{ 'trips.details_title' | translate }}</h2>
+        @if (selectedTrip) {
+        <span class="status-badge" [ngClass]="getStatusClass(selectedTrip.status)">
+          {{ getStatusKey(selectedTrip.status) | translate }}
+        </span>
+        }
+      </div>
+
+      @if (selectedTrip) {
+      @if (tripActionError) {
+      <div class="alert alert-error">{{ tripActionError | translate }}</div>
+      }
+      @if (tripActionSuccess) {
+      <div class="alert alert-success">{{ tripActionSuccess | translate }}</div>
+      }
+
+      @if (canManageTrips) {
+      <div class="trip-actions">
+        <button
+          type="button"
+          style="border-color: var(--color-success); background: var(--color-success); color: white;"
+          [disabled]="!canApproveSelectedTrip || isApprovingTrip"
+          (click)="approveSelectedTrip()"
+        >
+          {{
+            isApprovingTrip
+              ? ('trips.approving' | translate)
+              : ('trips.action.approve' | translate)
+          }}
+        </button>
+        <button
+          type="button"
+          style="border-color: var(--color-primary); background: var(--color-primary-light); color: var(--color-primary-dark);"
+          [disabled]="!canEditSelectedTrip"
+          (click)="openEditTrip()"
+        >
+          {{ 'trips.action.edit' | translate }}
+        </button>
+      </div>
+      }
+
+      @if (currentRole === RoleEnum.SOFER) {
+      <div class="trip-actions">
+        <button
+          type="button"
+          style="border-color: var(--color-success); background: var(--color-success); color: white;"
+          [disabled]="!canStartSelectedTrip || isStartingTrip"
+          (click)="startSelectedTrip()"
+        >
+          {{
+            isStartingTrip
+              ? ('trips.starting' | translate)
+              : ('trips.action.start' | translate)
+          }}
+        </button>
+      </div>
+      }
+
+      <div class="trip-details">
+        <div>
+          <span>{{ 'trips.driver' | translate }}</span>
+          <strong>{{ getTripDriverLabel(selectedTrip) }}</strong>
+        </div>
+        <div>
+          <span>{{ 'trips.vehicle' | translate }}</span>
+          <strong>{{ getTripVehicleLabel(selectedTrip) }}</strong>
+        </div>
+        <div>
+          <span>{{ 'trips.planned_distance' | translate }}</span>
+          <strong>{{ selectedTrip.planned_km ?? 0 }} km</strong>
+        </div>
+        <div>
+          <span>{{ 'trips.planned_duration' | translate }}</span>
+          <strong>{{ selectedTrip.planned_duration_min ?? 0 }} {{ 'planning.minutes_short' | translate }}</strong>
+        </div>
+        <div>
+          <span>{{ 'trips.started_at' | translate }}</span>
+          <strong>{{ selectedTrip.started_at ? (selectedTrip.started_at | date:'medium') : ('vehicles.not_available' | translate) }}</strong>
+        </div>
+        <div>
+          <span>{{ 'trips.completed_at' | translate }}</span>
+          <strong>{{ selectedTrip.completed_at ? (selectedTrip.completed_at | date:'medium') : ('vehicles.not_available' | translate) }}</strong>
+        </div>
+      </div>
+
+      @if (stopsError) {
+      <div class="alert alert-error">{{ stopsError | translate }}</div>
+      }
+
+      <h3 class="stops-title">{{ 'trips.stops_title' | translate }}</h3>
+      @if (isLoadingStops) {
+      <div class="loading-state">
+        <h2>{{ 'trips.loading_stops' | translate }}</h2>
+      </div>
+      } @else {
+      <div class="stop-list">
+        @for (stop of visibleStops; track stop.id) {
+        <article class="stop-row" [class.stop-row-disabled]="isStopDisabled(stop)">
+          <strong>#{{ stop.sequence }}</strong>
+          <div>
+            <span>{{ getStopTypeKey(stop.stop_type) | translate }}</span>
+            <small>{{ getStopAddress(stop) }}</small>
+          </div>
+          <span>{{ getStopStatusKey(stop.status) | translate }}</span>
+          @if (currentRole === RoleEnum.SOFER && selectedTrip.status === 'IN_PROGRESS') {
+          <button
+            type="button"
+            class="row-action stop-arrive-action"
+            [class.stop-arrived-action]="stop.arrival_time"
+            [disabled]="isArriveStopDisabled(stop)"
+            [attr.aria-disabled]="isArriveStopDisabled(stop)"
+            (click)="arriveAtStop(stop)"
+          >
+            {{
+              stop.arrival_time
+                ? ('trips.stop_arrived' | translate)
+                : arrivingStopId === stop.id
+                ? ('trips.arriving' | translate)
+                : ('trips.action.arrive' | translate)
+            }}
+          </button>
+          <button
+            type="button"
+            class="row-action stop-complete-action"
+            [class.stop-complete-disabled]="isCompleteStopDisabled(stop)"
+            [disabled]="isCompleteStopDisabled(stop)"
+            [attr.aria-disabled]="isCompleteStopDisabled(stop)"
+            (click)="completeStop(stop)"
+          >
+            {{
+              completingStopId === stop.id
+                ? ('trips.completing' | translate)
+                : ('trips.action.complete' | translate)
+            }}
+          </button>
+          <button
+            type="button"
+            class="row-action stop-fail-action"
+            [class.stop-fail-disabled]="isFailStopDisabled(stop)"
+            [disabled]="isFailStopDisabled(stop)"
+            [attr.aria-disabled]="isFailStopDisabled(stop)"
+            (click)="openFailStop(stop)"
+          >
+            {{
+              failingStopId === stop.id
+                ? ('trips.failing' | translate)
+                : ('trips.action.fail' | translate)
+            }}
+          </button>
+          }
+        </article>
+        } @empty {
+        <div class="empty-state">
+          <p>{{ 'trips.empty_stops' | translate }}</p>
+        </div>
+        }
+      </div>
+      }
+      } @else {
+      <div class="empty-state">
+        <p>{{ 'trips.select_trip' | translate }}</p>
+      </div>
+      }
+    </aside>
+  </div>
+
+  @if (isFailStopOpen) {
+  <div class="modal-backdrop" (click)="closeFailStop()"></div>
+
+  <section
+    class="trip-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'trips.fail_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'trips.fail_title' | translate }}</h2>
+        <p>{{ selectedFailStop ? getStopAddress(selectedFailStop) : '' }}</p>
+      </div>
+      <button type="button" class="row-action" (click)="closeFailStop()">
+        {{ 'orders.close' | translate }}
+      </button>
+    </div>
+
+    <div class="fail-stop-form">
+      <label>
+        <span>{{ 'trips.failure_reason' | translate }}</span>
+        <select
+          [value]="failStopReason"
+          [disabled]="!!failingStopId"
+          (change)="updateFailStopReason($any($event.target).value)"
+        >
+          @for (reason of failureReasons; track reason) {
+          <option [value]="reason">{{ getFailureReasonKey(reason) | translate }}</option>
+          }
+        </select>
+      </label>
+
+      <label>
+        <span>{{ 'trips.failure_notes' | translate }}</span>
+        <textarea
+          [value]="failStopNotes"
+          [disabled]="!!failingStopId"
+          [placeholder]="'trips.failure_notes_placeholder' | translate"
+          (input)="updateFailStopNotes($any($event.target).value)"
+        ></textarea>
+      </label>
+    </div>
+
+    <button
+      type="button"
+      class="primary-action fail-primary-action"
+      [disabled]="!!failingStopId"
+      (click)="submitFailStop()"
+    >
+      {{ (failingStopId ? 'trips.failing' : 'trips.fail_submit') | translate }}
+    </button>
+  </section>
+  }
+
+  @if (isEditTripOpen) {
+  <div class="modal-backdrop" (click)="closeEditTrip()"></div>
+
+  <section
+    class="trip-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'trips.edit_title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'trips.edit_title' | translate }}</h2>
+        <p>{{ selectedTrip?.id }}</p>
+      </div>
+      <button type="button" class="row-action" (click)="closeEditTrip()">
+        {{ 'orders.close' | translate }}
+      </button>
+    </div>
+
+    @if (editTripError) {
+    <div class="alert alert-error">{{ editTripError | translate }}</div>
+    }
+    @if (editTripSuccess) {
+    <div class="alert alert-success">{{ editTripSuccess | translate }}</div>
+    }
+
+    <div class="edit-grid">
+      <label>
+        <span>{{ 'trips.driver' | translate }}</span>
+        <select
+          [value]="editTripDriverId"
+          [disabled]="isSavingTrip || isLoadingOptions"
+          (change)="updateEditTripDriver($any($event.target).value)"
+        >
+          @for (driver of drivers; track driver.id) {
+          <option [value]="driver.id">{{ getDriverLabel(driver.id) }}</option>
+          } @empty {
+          <option value="">{{ 'vehicles.not_available' | translate }}</option>
+          }
+        </select>
+      </label>
+
+      <label>
+        <span>{{ 'trips.vehicle' | translate }}</span>
+        <select
+          [value]="editTripVehicleId"
+          [disabled]="isSavingTrip || isLoadingOptions"
+          (change)="updateEditTripVehicle($any($event.target).value)"
+        >
+          @for (vehicle of vehicles; track vehicle.id) {
+          <option [value]="vehicle.id">{{ vehicle.plate }}</option>
+          } @empty {
+          <option value="">{{ 'vehicles.not_available' | translate }}</option>
+          }
+        </select>
+      </label>
+    </div>
+
+    <button
+      type="button"
+      class="primary-action"
+      [disabled]="!hasEditTripChanges || isSavingTrip"
+      (click)="saveTripChanges()"
+    >
+      {{
+        isSavingTrip
+          ? ('trips.saving' | translate)
+          : ('trips.save' | translate)
+      }}
+    </button>
+  </section>
+  }
+</section>

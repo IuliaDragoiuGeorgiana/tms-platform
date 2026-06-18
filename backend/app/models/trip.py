@@ -61,3 +61,11 @@ class Trip(UUIDPrimaryKey, TimestampMixin, Base):
 
     def __repr__(self) -> str:
         return f"<Trip {self.planned_date} ({self.status.value})>"
+
+    @property
+    def driver_name(self) -> str | None:
+        return self.driver.user.full_name if self.driver and self.driver.user else None
+
+    @property
+    def vehicle_label(self) -> str | None:
+        return self.vehicle.plate if self.vehicle else None

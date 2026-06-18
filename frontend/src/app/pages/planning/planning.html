@@ -217,7 +217,7 @@
               (change)="updateEditTripDriver($any($event.target).value)"
             >
               @for (driver of driverOptions; track driver.value) {
-              <option [value]="driver.value">{{ driver.label }}</option>
+              <option [value]="driver.value" [selected]="driver.value === editTripDriverId">{{ driver.label }}</option>
               } @empty {
               <option value="">{{ 'vehicles.not_available' | translate }}</option>
               }
@@ -231,7 +231,7 @@
               (change)="updateEditTripVehicle($any($event.target).value)"
             >
               @for (vehicle of vehicleOptions; track vehicle.value) {
-              <option [value]="vehicle.value">{{ vehicle.label }}</option>
+              <option [value]="vehicle.value" [selected]="vehicle.value === editTripVehicleId">{{ vehicle.label }}</option>
               } @empty {
               <option value="">{{ 'vehicles.not_available' | translate }}</option>
               }
@@ -241,9 +241,18 @@
       </section>
 
       <section style="display: grid; gap: 12px; padding: 14px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background);">
-        <div>
-          <strong>{{ 'planning.trip_orders' | translate }}</strong>
-          <p style="margin: 6px 0 0; color: var(--color-text-muted);">{{ 'planning.trip_orders_edit_unavailable' | translate }}</p>
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+          <div>
+            <strong>{{ 'planning.trip_orders' | translate }}</strong>
+            <p style="margin: 6px 0 0; color: var(--color-text-muted);">{{ 'planning.trip_orders_remove_description' | translate }}</p>
+          </div>
+          <button
+            type="button"
+            style="border: 1px solid var(--color-primary); border-radius: 8px; padding: 8px 10px; background: var(--color-primary); color: white; cursor: pointer; font-weight: 900; white-space: nowrap;"
+            (click)="openAddTripOrderWindow()"
+          >
+            {{ 'planning.add_trip_order' | translate }}
+          </button>
         </div>
         @if (isLoadingTripStops) {
         <div class="loading-state">
@@ -251,11 +260,39 @@
         </div>
         } @else {
         <div style="display: grid; gap: 8px;">
-          @for (stop of selectedEditTripStops; track stop.id) {
-          <div style="display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface);">
-            <strong>#{{ stop.sequence }}</strong>
-            <span>{{ stop.order_id }}</span>
-            <span>{{ stop.stop_type }} / {{ stop.status }}</span>
+          @for (orderId of getTripOrderIds(); track orderId) {
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface);">
+            <div style="display: grid; gap: 4px;">
+              <strong>{{ orderId }}</strong>
+              <span style="color: var(--color-text-muted);">{{ getTripOrderStopSummary(orderId) }}</span>
+            </div>
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+              @if (pendingRemoveTripOrderId === orderId) {
+              <button
+                type="button"
+                style="border: 1px solid var(--color-border); border-radius: 8px; padding: 8px 10px; background: var(--color-surface); color: var(--color-text); cursor: pointer; font-weight: 800;"
+                (click)="cancelRemoveTripOrder()"
+              >
+                {{ 'drivers.cancel' | translate }}
+              </button>
+              }
+              <button
+                type="button"
+                style="border: 1px solid var(--color-danger); border-radius: 8px; padding: 8px 10px; background: var(--color-danger); color: white; cursor: pointer; font-weight: 800;"
+                [disabled]="removingTripOrderId === orderId"
+                [style.opacity]="removingTripOrderId === orderId ? '0.6' : '1'"
+                [style.cursor]="removingTripOrderId === orderId ? 'not-allowed' : 'pointer'"
+                (click)="requestRemoveTripOrder(orderId)"
+              >
+                {{
+                  removingTripOrderId === orderId
+                    ? ('planning.removing_trip_order' | translate)
+                    : pendingRemoveTripOrderId === orderId
+                      ? ('planning.confirm_remove_trip_order' | translate)
+                      : ('planning.remove_trip_order' | translate)
+                }}
+              </button>
+            </div>
           </div>
           } @empty {
           <p style="margin: 0; color: var(--color-text-muted);">{{ 'planning.empty_trip_orders' | translate }}</p>
@@ -280,6 +317,74 @@
       </button>
     </div>
   </section>
+
+  @if (isAddTripOrderWindowOpen) {
+  <div
+    class="modal-backdrop"
+    style="position: fixed; inset: 0; z-index: 1002; background: rgba(15, 23, 42, 0.3); backdrop-filter: blur(6px);"
+    (click)="closeAddTripOrderWindow()"
+  ></div>
+
+  <section
+    class="strategy-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'planning.add_trip_order_title' | translate"
+    style="position: fixed; inset: 12vh 24vw auto; z-index: 1003; max-height: 76vh; overflow: auto; padding: 22px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="panel-header">
+      <div>
+        <h2>{{ 'planning.add_trip_order_title' | translate }}</h2>
+        <p>{{ 'planning.add_trip_order_description' | translate }}</p>
+      </div>
+      <button type="button" class="planning-action-primary" style="border: 1px solid var(--color-border); border-radius: 8px; padding: 10px 12px; cursor: pointer;" (click)="closeAddTripOrderWindow()">
+        {{ 'orders.close' | translate }}
+      </button>
+    </div>
+
+    @if (isLoadingEligibleOrders) {
+    <div class="loading-state">
+      <h2>{{ 'planning.loading_eligible_orders' | translate }}</h2>
+    </div>
+    } @else {
+    <div style="display: grid; gap: 10px;">
+      @for (order of getAvailableTripOrders(); track order.id) {
+      <button
+        type="button"
+        style="display: grid; gap: 8px; width: 100%; text-align: left; border: 1px solid var(--color-border); border-radius: 8px; padding: 12px; background: var(--color-background); color: var(--color-text); cursor: pointer;"
+        [disabled]="addingTripOrderId === order.id"
+        [style.opacity]="addingTripOrderId === order.id ? '0.65' : '1'"
+        [style.cursor]="addingTripOrderId === order.id ? 'not-allowed' : 'pointer'"
+        (click)="addOrderToTrip(order)"
+      >
+        <span style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+          <strong>{{ order.order_ref }}</strong>
+          <span style="font-weight: 800; color: var(--color-primary);">
+            {{
+              addingTripOrderId === order.id
+                ? ('planning.adding_trip_order' | translate)
+                : ('planning.select_trip_order' | translate)
+            }}
+          </span>
+        </span>
+        <span style="color: var(--color-text-muted);">{{ order.client_name || ('vehicles.not_available' | translate) }}</span>
+        <span>{{ order.address_pickup }} -> {{ order.address_delivery }}</span>
+        <span style="display: flex; flex-wrap: wrap; gap: 8px; color: var(--color-text-muted);">
+          <span>{{ order.kg }} kg</span>
+          <span>{{ order.m3 }} m3</span>
+          <span>{{ getCargoTypeKey(order.type_marfa) | translate }}</span>
+          <span>{{ getPriorityKey(order.priority) | translate }}</span>
+          <span>{{ 'orders.delivery_deadline' | translate }}: {{ order.delivery_deadline }}</span>
+        </span>
+      </button>
+      } @empty {
+      <p style="margin: 0; color: var(--color-text-muted);">{{ 'planning.empty_add_trip_orders' | translate }}</p>
+      }
+    </div>
+    }
+  </section>
+  }
   }
 
   @if (strategyComparison) {

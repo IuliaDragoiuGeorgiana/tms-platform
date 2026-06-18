@@ -77,7 +77,7 @@ def get_or_create_user(
     db.commit()
     db.refresh(user)
 
-    print(f"User creat: {email} / parola: {password}")
+    print(f"User creat: {email}")
     return user
 
 
@@ -353,12 +353,6 @@ def seed_demo_data():
         )
 
         print("\nSeed demo data finalizat cu succes.")
-        print("Date login demo:")
-        print("Manager:  manager.demo@demo-logistics.ro / ManagerDemo123")
-        print("Dispecer: dispecer.demo@demo-logistics.ro / DispecerDemo123")
-        print("Client:   client.demo@demo-logistics.ro / ClientDemo123")
-        print("Soferi:   sofer1.demo@demo-logistics.ro / SoferDemo123")
-        print("         sofer2.demo@demo-logistics.ro / SoferDemo123")
 
     finally:
         db.close()

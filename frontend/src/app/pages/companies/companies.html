@@ -56,8 +56,8 @@
             <span>{{ 'companies.plan' | translate }}: {{ company.plan }}</span>
             @if (company.vatId) {
             <span>{{ 'companies.vat_id' | translate }}: {{ company.vatId }}</span>
-            } @if (company.city || company.country) {
-            <span>{{ company.city }}, {{ company.country }}</span>
+            } @if (company.depotLocation) {
+            <span>{{ 'companies.depot' | translate }}: {{ company.depotLocation }}</span>
             }
           </div>
         </div>
@@ -186,10 +186,17 @@
       </div>
       }
 
-      @if (selectedViewCompany.city || selectedViewCompany.country) {
+      @if (selectedViewCompany.depotLocation) {
       <div>
-        <dt>{{ 'companies.location' | translate }}</dt>
-        <dd>{{ selectedViewCompany.city }}, {{ selectedViewCompany.country }}</dd>
+        <dt>{{ 'companies.depot' | translate }}</dt>
+        <dd>{{ selectedViewCompany.depotLocation }}</dd>
+      </div>
+      }
+
+      @if (selectedViewCompany.depotLatitude && selectedViewCompany.depotLongitude) {
+      <div>
+        <dt>{{ 'companies.depot_coordinates' | translate }}</dt>
+        <dd>{{ selectedViewCompany.depotLatitude }}, {{ selectedViewCompany.depotLongitude }}</dd>
       </div>
       }
 
@@ -365,6 +372,51 @@
           <small>{{ 'companies.form.positive_number' | translate }}</small>
           }
         </div>
+
+        <div class="form-section-title">
+          <h3>{{ 'companies.form.depot_title' | translate }}</h3>
+          <p>{{ 'companies.form.depot_description' | translate }}</p>
+        </div>
+
+        <div class="form-group">
+          <label for="company_depot_county">{{ 'companies.form.depot_county' | translate }}</label>
+          <input
+            id="company_depot_county"
+            type="text"
+            formControlName="depot_county"
+            [placeholder]="'companies.form.depot_county_placeholder' | translate"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="company_depot_city">{{ 'companies.form.depot_city' | translate }}</label>
+          <input
+            id="company_depot_city"
+            type="text"
+            formControlName="depot_city"
+            [placeholder]="'companies.form.depot_city_placeholder' | translate"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="company_depot_street">{{ 'companies.form.depot_street' | translate }}</label>
+          <input
+            id="company_depot_street"
+            type="text"
+            formControlName="depot_street"
+            [placeholder]="'companies.form.depot_street_placeholder' | translate"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="company_depot_number">{{ 'companies.form.depot_number' | translate }}</label>
+          <input
+            id="company_depot_number"
+            type="text"
+            formControlName="depot_number"
+            [placeholder]="'companies.form.depot_number_placeholder' | translate"
+          />
+        </div>
       </div>
 
       @if (createCompanyError) {
@@ -467,6 +519,57 @@
           <input type="checkbox" formControlName="is_active" />
           <span>{{ 'companies.form.active' | translate }}</span>
         </label>
+
+        <div class="form-section-title">
+          <h3>{{ 'companies.form.depot_title' | translate }}</h3>
+          <p>{{ 'companies.form.depot_description' | translate }}</p>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_company_depot_county">
+            {{ 'companies.form.depot_county' | translate }}
+          </label>
+          <input
+            id="edit_company_depot_county"
+            type="text"
+            formControlName="depot_county"
+            [placeholder]="'companies.form.depot_county_placeholder' | translate"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="edit_company_depot_city">{{ 'companies.form.depot_city' | translate }}</label>
+          <input
+            id="edit_company_depot_city"
+            type="text"
+            formControlName="depot_city"
+            [placeholder]="'companies.form.depot_city_placeholder' | translate"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="edit_company_depot_street">
+            {{ 'companies.form.depot_street' | translate }}
+          </label>
+          <input
+            id="edit_company_depot_street"
+            type="text"
+            formControlName="depot_street"
+            [placeholder]="'companies.form.depot_street_placeholder' | translate"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="edit_company_depot_number">
+            {{ 'companies.form.depot_number' | translate }}
+          </label>
+          <input
+            id="edit_company_depot_number"
+            type="text"
+            formControlName="depot_number"
+            [placeholder]="'companies.form.depot_number_placeholder' | translate"
+          />
+        </div>
       </div>
 
       @if (updateCompanyError) {

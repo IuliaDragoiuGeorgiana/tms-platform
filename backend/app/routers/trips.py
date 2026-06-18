@@ -1,22 +1,90 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from datetime import datetime, timezone
 import uuid
+from datetime import datetime, timezone
 
 from app.database import get_db
-from app.models.user import User
-from app.models.trip import Trip, TripStatusEnum
-from app.models.trip_stop import TripStop, StopStatusEnum, StopTypeEnum, FailureReasonEnum
+from app.dependencies import get_current_user, require_roles
 from app.models.order import Order, OrderStatusEnum
-from app.schemas.trip import TripResponse, TripStopResponse, CompleteStopRequest, FailStopRequest
-from app.dependencies import require_roles, get_current_user
+from app.models.trip import Trip, TripStatusEnum
+from app.models.trip_stop import (
+    FailureReasonEnum,
+    StopStatusEnum,
+    StopTypeEnum,
+    TripStop,
+)
+from app.models.user import User
+from app.schemas.trip import (
+    CompleteStopRequest,
+    FailStopRequest,
+    TripResponse,
+    TripStopResponse,
+)
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/trips", tags=["Trips"])
+
+DRIVER_VISIBLE_STATUSES = (
+    TripStatusEnum.APPROVED,
+    TripStatusEnum.IN_PROGRESS,
+    TripStatusEnum.COMPLETED,
+    TripStatusEnum.INTERRUPTED,
+)
+
+
+def _current_role(current_user: User) -> str:
+    return (
+        current_user.role.value
+        if hasattr(current_user.role, "value")
+        else str(current_user.role)
+    )
+
+
+def _get_current_driver(db: Session, current_user: User):
+    from app.models.driver import Driver
+
+    driver = db.query(Driver).filter(Driver.user_id == current_user.id).first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Nu ai profil de șofer")
+
+    return driver
+
+
+def _ensure_driver_can_view_trip(trip: Trip, db: Session, current_user: User) -> None:
+    if _current_role(current_user) != "SOFER":
+        return
+
+    driver = _get_current_driver(db, current_user)
+    if trip.driver_id != driver.id or trip.status not in DRIVER_VISIBLE_STATUSES:
+        raise HTTPException(status_code=404, detail="Cursa nu a fost găsită")
+
+
+def _complete_trip_if_no_pending_stops(trip: Trip, db: Session) -> None:
+    db.flush()
+
+    pending_stops = (
+        db.query(TripStop)
+        .filter(
+            TripStop.trip_id == trip.id,
+            TripStop.status == StopStatusEnum.PENDING,
+        )
+        .count()
+    )
+
+    if pending_stops > 0:
+        return
+
+    trip.status = TripStatusEnum.COMPLETED
+    trip.completed_at = datetime.now(timezone.utc)
+
+    if trip.started_at:
+        duration = trip.completed_at - trip.started_at
+        trip.actual_duration_min = int(duration.total_seconds() / 60)
 
 
 # ==========================================
 # VIZUALIZARE CURSE
 # ==========================================
+
 
 @router.get("/", response_model=list[TripResponse])
 def list_trips(
@@ -29,17 +97,17 @@ def list_trips(
     DISPECER/MANAGER: vede toate cursele din companie.
     SOFER: vede doar cursele lui.
     """
-    current_role = current_user.role.value if hasattr(current_user.role, 'value') else str(current_user.role)
+    current_role = _current_role(current_user)
 
     query = db.query(Trip).filter(Trip.company_id == current_user.company_id)
 
-    # Șoferul vede doar cursele lui
+    # Șoferul vede doar cursele aprobate sau deja aflate în execuție/istoric.
     if current_role == "SOFER":
-        from app.models.driver import Driver
-        driver = db.query(Driver).filter(Driver.user_id == current_user.id).first()
-        if not driver:
-            raise HTTPException(status_code=404, detail="Nu ai profil de șofer")
-        query = query.filter(Trip.driver_id == driver.id)
+        driver = _get_current_driver(db, current_user)
+        query = query.filter(
+            Trip.driver_id == driver.id,
+            Trip.status.in_(DRIVER_VISIBLE_STATUSES),
+        )
 
     if status_filter:
         query = query.filter(Trip.status == TripStatusEnum(status_filter))
@@ -56,13 +124,19 @@ def get_trip(
     current_user: User = Depends(get_current_user),
 ):
     """Returnează o cursă specifică."""
-    trip = db.query(Trip).filter(
-        Trip.id == trip_id,
-        Trip.company_id == current_user.company_id,
-    ).first()
+    trip = (
+        db.query(Trip)
+        .filter(
+            Trip.id == trip_id,
+            Trip.company_id == current_user.company_id,
+        )
+        .first()
+    )
 
     if not trip:
         raise HTTPException(status_code=404, detail="Cursa nu a fost găsită")
+
+    _ensure_driver_can_view_trip(trip, db, current_user)
 
     return trip
 
@@ -77,17 +151,26 @@ def get_trip_stops(
     Returnează stopurile unei curse în ordine.
     Șoferul vede lista: pickup 1, pickup 2, delivery 1, delivery 2 etc.
     """
-    trip = db.query(Trip).filter(
-        Trip.id == trip_id,
-        Trip.company_id == current_user.company_id,
-    ).first()
+    trip = (
+        db.query(Trip)
+        .filter(
+            Trip.id == trip_id,
+            Trip.company_id == current_user.company_id,
+        )
+        .first()
+    )
 
     if not trip:
         raise HTTPException(status_code=404, detail="Cursa nu a fost găsită")
 
-    stops = db.query(TripStop).filter(
-        TripStop.trip_id == trip_id
-    ).order_by(TripStop.sequence).all()
+    _ensure_driver_can_view_trip(trip, db, current_user)
+
+    stops = (
+        db.query(TripStop)
+        .filter(TripStop.trip_id == trip_id)
+        .order_by(TripStop.sequence)
+        .all()
+    )
 
     return stops
 
@@ -95,6 +178,7 @@ def get_trip_stops(
 # ==========================================
 # APROBARE CURSĂ (DISPECER/MANAGER)
 # ==========================================
+
 
 @router.patch("/{trip_id}/approve", response_model=TripResponse)
 def approve_trip(
@@ -106,10 +190,14 @@ def approve_trip(
     Dispecerul aprobă o cursă propusă de algoritm.
     PROPOSED → APPROVED. Acum șoferul o poate vedea și porni.
     """
-    trip = db.query(Trip).filter(
-        Trip.id == trip_id,
-        Trip.company_id == current_user.company_id,
-    ).first()
+    trip = (
+        db.query(Trip)
+        .filter(
+            Trip.id == trip_id,
+            Trip.company_id == current_user.company_id,
+        )
+        .first()
+    )
 
     if not trip:
         raise HTTPException(status_code=404, detail="Cursa nu a fost găsită")
@@ -117,7 +205,7 @@ def approve_trip(
     if trip.status != TripStatusEnum.PROPOSED:
         raise HTTPException(
             status_code=400,
-            detail=f"Cursa are statusul {trip.status.value}, nu PROPOSED"
+            detail=f"Cursa are statusul {trip.status.value}, nu PROPOSED",
         )
 
     trip.status = TripStatusEnum.APPROVED
@@ -131,6 +219,7 @@ def approve_trip(
 # EXECUȚIE CURSĂ (SOFER)
 # ==========================================
 
+
 @router.patch("/{trip_id}/start", response_model=TripResponse)
 def start_trip(
     trip_id: uuid.UUID,
@@ -142,22 +231,29 @@ def start_trip(
     Marchează ora reală de plecare.
     """
     from app.models.driver import Driver
+
     driver = db.query(Driver).filter(Driver.user_id == current_user.id).first()
     if not driver:
         raise HTTPException(status_code=404, detail="Nu ai profil de șofer")
 
-    trip = db.query(Trip).filter(
-        Trip.id == trip_id,
-        Trip.driver_id == driver.id,
-    ).first()
+    trip = (
+        db.query(Trip)
+        .filter(
+            Trip.id == trip_id,
+            Trip.driver_id == driver.id,
+        )
+        .first()
+    )
 
     if not trip:
-        raise HTTPException(status_code=404, detail="Cursa nu a fost găsită sau nu ți-e alocată")
+        raise HTTPException(
+            status_code=404, detail="Cursa nu a fost găsită sau nu ți-e alocată"
+        )
 
     if trip.status != TripStatusEnum.APPROVED:
         raise HTTPException(
             status_code=400,
-            detail=f"Cursa are statusul {trip.status.value}, nu APPROVED"
+            detail=f"Cursa are statusul {trip.status.value}, nu APPROVED",
         )
 
     trip.status = TripStatusEnum.IN_PROGRESS
@@ -186,28 +282,56 @@ def arrive_at_stop(
     E ca un check-in: "am ajuns la adresă".
     """
     from app.models.driver import Driver
+
     driver = db.query(Driver).filter(Driver.user_id == current_user.id).first()
     if not driver:
         raise HTTPException(status_code=404, detail="Nu ai profil de șofer")
 
-    trip = db.query(Trip).filter(
-        Trip.id == trip_id,
-        Trip.driver_id == driver.id,
-    ).first()
+    trip = (
+        db.query(Trip)
+        .filter(
+            Trip.id == trip_id,
+            Trip.driver_id == driver.id,
+        )
+        .first()
+    )
 
     if not trip or trip.status != TripStatusEnum.IN_PROGRESS:
         raise HTTPException(status_code=400, detail="Cursa nu e în desfășurare")
 
-    stop = db.query(TripStop).filter(
-        TripStop.id == stop_id,
-        TripStop.trip_id == trip_id,
-    ).first()
+    stop = (
+        db.query(TripStop)
+        .filter(
+            TripStop.id == stop_id,
+            TripStop.trip_id == trip_id,
+        )
+        .first()
+    )
 
     if not stop:
         raise HTTPException(status_code=404, detail="Stopul nu a fost găsit")
 
     if stop.status != StopStatusEnum.PENDING:
-        raise HTTPException(status_code=400, detail=f"Stopul are deja statusul {stop.status.value}")
+        raise HTTPException(
+            status_code=400, detail=f"Stopul are deja statusul {stop.status.value}"
+        )
+
+    previous_pending_stop = (
+        db.query(TripStop)
+        .filter(
+            TripStop.trip_id == trip_id,
+            TripStop.sequence < stop.sequence,
+            TripStop.status == StopStatusEnum.PENDING,
+        )
+        .order_by(TripStop.sequence)
+        .first()
+    )
+
+    if previous_pending_stop:
+        raise HTTPException(
+            status_code=400,
+            detail="Trebuie să finalizezi mai întâi oprirea anterioară.",
+        )
 
     stop.arrival_time = datetime.now(timezone.utc)
     stop.eta_actual = datetime.now(timezone.utc)
@@ -215,6 +339,7 @@ def arrive_at_stop(
     db.refresh(stop)
 
     return stop
+
 
 @router.patch("/{trip_id}/stops/{stop_id}/complete", response_model=TripStopResponse)
 def complete_stop(
@@ -236,18 +361,26 @@ def complete_stop(
     if not driver:
         raise HTTPException(status_code=404, detail="Nu ai profil de șofer")
 
-    trip = db.query(Trip).filter(
-        Trip.id == trip_id,
-        Trip.driver_id == driver.id,
-    ).first()
+    trip = (
+        db.query(Trip)
+        .filter(
+            Trip.id == trip_id,
+            Trip.driver_id == driver.id,
+        )
+        .first()
+    )
 
     if not trip or trip.status != TripStatusEnum.IN_PROGRESS:
         raise HTTPException(status_code=400, detail="Cursa nu e în desfășurare")
 
-    stop = db.query(TripStop).filter(
-        TripStop.id == stop_id,
-        TripStop.trip_id == trip_id,
-    ).first()
+    stop = (
+        db.query(TripStop)
+        .filter(
+            TripStop.id == stop_id,
+            TripStop.trip_id == trip_id,
+        )
+        .first()
+    )
 
     if not stop:
         raise HTTPException(status_code=404, detail="Stopul nu a fost găsit")
@@ -258,21 +391,44 @@ def complete_stop(
             detail=f"Stopul are deja statusul {stop.status.value}",
         )
 
+    previous_pending_stop = (
+        db.query(TripStop)
+        .filter(
+            TripStop.trip_id == trip_id,
+            TripStop.sequence < stop.sequence,
+            TripStop.status == StopStatusEnum.PENDING,
+        )
+        .order_by(TripStop.sequence)
+        .first()
+    )
+
+    if previous_pending_stop:
+        raise HTTPException(
+            status_code=400,
+            detail="Trebuie să finalizezi mai întâi oprirea anterioară.",
+        )
+
+    if not stop.arrival_time:
+        raise HTTPException(
+            status_code=400,
+            detail="Trebuie să ajungi la oprire înainte să o finalizezi.",
+        )
+
     stop.status = StopStatusEnum.COMPLETED
     stop.departure_time = datetime.now(timezone.utc)
     stop.notes = data.notes
-
-    if not stop.arrival_time:
-        stop.arrival_time = datetime.now(timezone.utc)
 
     # Doar la DELIVERY marcăm întreaga comandă ca livrată.
     if stop.stop_type == StopTypeEnum.DELIVERY:
         stop.order.status = OrderStatusEnum.DELIVERED
 
+    _complete_trip_if_no_pending_stops(trip, db)
+
     db.commit()
     db.refresh(stop)
 
     return stop
+
 
 @router.patch("/{trip_id}/stops/{stop_id}/fail", response_model=TripStopResponse)
 def fail_stop(
@@ -285,33 +441,67 @@ def fail_stop(
     """
     Șoferul raportează eșec la un stop.
     Motivele: ABSENT, REFUSED, WRONG_ADDRESS, DAMAGED, OTHER.
-    
+
     Dacă PICKUP eșuează → DELIVERY-ul aceleiași comenzi devine SKIPPED automat.
     Dacă DELIVERY eșuează → comanda revine FAILED, reintrare în order pool.
     """
     from app.models.driver import Driver
+
     driver = db.query(Driver).filter(Driver.user_id == current_user.id).first()
     if not driver:
         raise HTTPException(status_code=404, detail="Nu ai profil de șofer")
 
-    trip = db.query(Trip).filter(
-        Trip.id == trip_id,
-        Trip.driver_id == driver.id,
-    ).first()
+    trip = (
+        db.query(Trip)
+        .filter(
+            Trip.id == trip_id,
+            Trip.driver_id == driver.id,
+        )
+        .first()
+    )
 
     if not trip or trip.status != TripStatusEnum.IN_PROGRESS:
         raise HTTPException(status_code=400, detail="Cursa nu e în desfășurare")
 
-    stop = db.query(TripStop).filter(
-        TripStop.id == stop_id,
-        TripStop.trip_id == trip_id,
-    ).first()
+    stop = (
+        db.query(TripStop)
+        .filter(
+            TripStop.id == stop_id,
+            TripStop.trip_id == trip_id,
+        )
+        .first()
+    )
 
     if not stop:
         raise HTTPException(status_code=404, detail="Stopul nu a fost găsit")
 
     if stop.status != StopStatusEnum.PENDING:
-        raise HTTPException(status_code=400, detail=f"Stopul are deja statusul {stop.status.value}")
+        raise HTTPException(
+            status_code=400, detail=f"Stopul are deja statusul {stop.status.value}"
+        )
+
+    previous_pending_stop = (
+        db.query(TripStop)
+        .filter(
+            TripStop.trip_id == trip_id,
+            TripStop.sequence < stop.sequence,
+            TripStop.status == StopStatusEnum.PENDING,
+        )
+        .order_by(TripStop.sequence)
+        .first()
+    )
+
+    if previous_pending_stop:
+        raise HTTPException(
+            status_code=400,
+            detail="Trebuie să finalizezi mai întâi oprirea anterioară.",
+        )
+
+    if not stop.arrival_time:
+        raise HTTPException(
+            status_code=400,
+            detail="Trebuie să ajungi la oprire înainte să raportezi eșecul.",
+        )
 
     stop.status = StopStatusEnum.FAILED
     try:
@@ -330,11 +520,15 @@ def fail_stop(
 
     # Dacă pickup eșuează, skip automat delivery-ul aceleiași comenzi
     if stop.stop_type == StopTypeEnum.PICKUP:
-        delivery_stop = db.query(TripStop).filter(
-            TripStop.trip_id == trip_id,
-            TripStop.order_id == stop.order_id,
-            TripStop.stop_type == StopTypeEnum.DELIVERY,
-        ).first()
+        delivery_stop = (
+            db.query(TripStop)
+            .filter(
+                TripStop.trip_id == trip_id,
+                TripStop.order_id == stop.order_id,
+                TripStop.stop_type == StopTypeEnum.DELIVERY,
+            )
+            .first()
+        )
 
         if delivery_stop and delivery_stop.status == StopStatusEnum.PENDING:
             delivery_stop.status = StopStatusEnum.SKIPPED
@@ -344,66 +538,10 @@ def fail_stop(
     stop.order.status = OrderStatusEnum.FAILED
     stop.order.attempts_count += 1
 
+    _complete_trip_if_no_pending_stops(trip, db)
+
     db.commit()
     db.refresh(stop)
 
     return stop
 
-
-# ==========================================
-# FINALIZARE CURSĂ (SOFER)
-# ==========================================
-
-@router.patch("/{trip_id}/complete", response_model=TripResponse)
-def complete_trip(
-    trip_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("SOFER")),
-):
-    """
-    Șoferul finalizează cursa. IN_PROGRESS → COMPLETED.
-    Se calculează durata reală și km reali.
-    """
-    from app.models.driver import Driver
-    driver = db.query(Driver).filter(Driver.user_id == current_user.id).first()
-    if not driver:
-        raise HTTPException(status_code=404, detail="Nu ai profil de șofer")
-
-    trip = db.query(Trip).filter(
-        Trip.id == trip_id,
-        Trip.driver_id == driver.id,
-    ).first()
-
-    if not trip:
-        raise HTTPException(status_code=404, detail="Cursa nu a fost găsită")
-
-    if trip.status != TripStatusEnum.IN_PROGRESS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cursa are statusul {trip.status.value}, nu IN_PROGRESS"
-        )
-
-    # Verifică că toate stopurile sunt finalizate
-    pending_stops = db.query(TripStop).filter(
-        TripStop.trip_id == trip_id,
-        TripStop.status == StopStatusEnum.PENDING,
-    ).count()
-
-    if pending_stops > 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Mai ai {pending_stops} stopuri nefinalizate"
-        )
-
-    trip.status = TripStatusEnum.COMPLETED
-    trip.completed_at = datetime.now(timezone.utc)
-
-    # Calculează durata reală
-    if trip.started_at:
-        duration = trip.completed_at - trip.started_at
-        trip.actual_duration_min = int(duration.total_seconds() / 60)
-
-    db.commit()
-    db.refresh(trip)
-
-    return trip

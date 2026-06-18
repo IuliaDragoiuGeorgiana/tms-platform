@@ -1,7 +1,13 @@
-import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { ChangeDetectorRef, Component, Inject, OnDestroy } from '@angular/core';
+import { CommonModule, DOCUMENT } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 
 import { AuthService, RoleEnum } from '../../core/services/auth';
+import {
+  ServiceTimeConfigResponse,
+  SystemConfigService,
+  UpdateServiceTimeConfigRequest,
+} from '../../core/services/system-config';
 import { TranslatePipe } from '../../core/pipes/translate';
 
 interface Metric {
@@ -29,6 +35,17 @@ interface RoleDashboard {
   items: DashboardItem[];
   activities: string[];
   actions: string[];
+}
+
+interface ServiceTimeRow {
+  key: keyof ServiceTimeConfigResponse;
+  label: string;
+  value: number;
+}
+
+interface ServiceTimeGroup {
+  title: string;
+  rows: ServiceTimeRow[];
 }
 
 const ROLE_DASHBOARDS: Record<RoleEnum, RoleDashboard> = {
@@ -231,14 +248,179 @@ const ROLE_DASHBOARDS: Record<RoleEnum, RoleDashboard> = {
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })
-export class Dashboard {
+export class Dashboard implements OnDestroy {
   currentRole: RoleEnum;
   roleLabel: string;
   dashboard: RoleDashboard;
+  isServiceTimeWindowOpen = false;
+  isLoadingServiceTimes = false;
+  isSavingServiceTimes = false;
+  serviceTimeError = '';
+  serviceTimeSuccess = '';
+  serviceTimeConfig: ServiceTimeConfigResponse | null = null;
+  originalServiceTimeConfig: ServiceTimeConfigResponse | null = null;
+  serviceTimeGroups: ServiceTimeGroup[] = [];
 
-  constructor(private authService: AuthService) {
+  constructor(
+    private authService: AuthService,
+    private systemConfigService: SystemConfigService,
+    private changeDetectorRef: ChangeDetectorRef,
+    @Inject(DOCUMENT) private document: Document,
+  ) {
     this.currentRole = this.authService.getCurrentRole();
     this.roleLabel = `dashboard.role.${this.currentRole}`;
     this.dashboard = ROLE_DASHBOARDS[this.currentRole];
+  }
+
+  ngOnDestroy(): void {
+    this.unlockBackgroundScroll();
+  }
+
+  get isManager(): boolean {
+    return this.currentRole === RoleEnum.MANAGER;
+  }
+
+  openServiceTimeWindow(): void {
+    if (!this.isManager) {
+      return;
+    }
+
+    this.isServiceTimeWindowOpen = true;
+    this.serviceTimeError = '';
+    this.serviceTimeSuccess = '';
+    this.serviceTimeConfig = null;
+    this.originalServiceTimeConfig = null;
+    this.serviceTimeGroups = [];
+    this.loadServiceTimes();
+    this.lockBackgroundScroll();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  closeServiceTimeWindow(): void {
+    this.isServiceTimeWindowOpen = false;
+    this.isLoadingServiceTimes = false;
+    this.isSavingServiceTimes = false;
+    this.serviceTimeError = '';
+    this.serviceTimeSuccess = '';
+    this.serviceTimeConfig = null;
+    this.originalServiceTimeConfig = null;
+    this.serviceTimeGroups = [];
+    this.unlockBackgroundScroll();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  private loadServiceTimes(): void {
+    this.isLoadingServiceTimes = true;
+    this.serviceTimeError = '';
+    this.serviceTimeSuccess = '';
+    this.changeDetectorRef.detectChanges();
+
+    this.systemConfigService.getServiceTimeConfig().subscribe({
+      next: (config) => {
+        this.serviceTimeConfig = { ...config };
+        this.originalServiceTimeConfig = { ...config };
+        this.serviceTimeGroups = this.buildServiceTimeGroups(config);
+        this.isLoadingServiceTimes = false;
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.serviceTimeError = error.error?.detail ?? 'common.error_generic';
+        this.isLoadingServiceTimes = false;
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
+  updateServiceTimeValue(key: keyof ServiceTimeConfigResponse, value: string): void {
+    if (!this.serviceTimeConfig) {
+      return;
+    }
+
+    const parsedValue = Number(value);
+    this.serviceTimeConfig = {
+      ...this.serviceTimeConfig,
+      [key]: Number.isFinite(parsedValue) ? parsedValue : 0,
+    };
+    this.serviceTimeGroups = this.buildServiceTimeGroups(this.serviceTimeConfig);
+    this.serviceTimeError = '';
+    this.serviceTimeSuccess = '';
+    this.changeDetectorRef.detectChanges();
+  }
+
+  hasServiceTimeChanges(): boolean {
+    const current = this.serviceTimeConfig;
+    const original = this.originalServiceTimeConfig;
+
+    if (!current || !original) {
+      return false;
+    }
+
+    return (Object.keys(current) as Array<keyof ServiceTimeConfigResponse>).some(
+      (key) => current[key] !== original[key],
+    );
+  }
+
+  saveServiceTimes(): void {
+    if (!this.serviceTimeConfig || !this.hasServiceTimeChanges()) {
+      return;
+    }
+
+    this.isSavingServiceTimes = true;
+    this.serviceTimeError = '';
+    this.serviceTimeSuccess = '';
+    this.changeDetectorRef.detectChanges();
+
+    const payload: UpdateServiceTimeConfigRequest = { ...this.serviceTimeConfig };
+
+    this.systemConfigService.updateServiceTimeConfig(payload).subscribe({
+      next: (config) => {
+        this.serviceTimeConfig = { ...config };
+        this.originalServiceTimeConfig = { ...config };
+        this.serviceTimeGroups = this.buildServiceTimeGroups(config);
+        this.isSavingServiceTimes = false;
+        this.serviceTimeSuccess = 'dashboard.service_time.save_success';
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.serviceTimeError = error.error?.detail ?? 'common.error_generic';
+        this.isSavingServiceTimes = false;
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
+  private buildServiceTimeGroups(config: ServiceTimeConfigResponse): ServiceTimeGroup[] {
+    const rows: ServiceTimeRow[] = [
+      { key: 'standard_pickup_service_min', label: 'dashboard.service_time.standard_pickup', value: config.standard_pickup_service_min },
+      { key: 'standard_delivery_service_min', label: 'dashboard.service_time.standard_delivery', value: config.standard_delivery_service_min },
+      { key: 'fragil_pickup_service_min', label: 'dashboard.service_time.fragile_pickup', value: config.fragil_pickup_service_min },
+      { key: 'fragil_delivery_service_min', label: 'dashboard.service_time.fragile_delivery', value: config.fragil_delivery_service_min },
+      { key: 'perisabil_pickup_service_min', label: 'dashboard.service_time.perishable_pickup', value: config.perisabil_pickup_service_min },
+      { key: 'perisabil_delivery_service_min', label: 'dashboard.service_time.perishable_delivery', value: config.perisabil_delivery_service_min },
+      { key: 'adr_pickup_service_min', label: 'dashboard.service_time.adr_pickup', value: config.adr_pickup_service_min },
+      { key: 'adr_delivery_service_min', label: 'dashboard.service_time.adr_delivery', value: config.adr_delivery_service_min },
+      { key: 'service_extra_minutes_per_500kg', label: 'dashboard.service_time.extra_kg', value: config.service_extra_minutes_per_500kg },
+      { key: 'service_extra_minutes_per_5m3', label: 'dashboard.service_time.extra_m3', value: config.service_extra_minutes_per_5m3 },
+      { key: 'service_max_minutes', label: 'dashboard.service_time.max_minutes', value: config.service_max_minutes },
+    ];
+
+    return [
+      {
+        title: 'dashboard.service_time.base_group',
+        rows: rows.slice(0, 8),
+      },
+      {
+        title: 'dashboard.service_time.adjustments_group',
+        rows: rows.slice(8),
+      },
+    ];
+  }
+
+  private lockBackgroundScroll(): void {
+    this.document.body.classList.add('modal-scroll-lock');
+  }
+
+  private unlockBackgroundScroll(): void {
+    this.document.body.classList.remove('modal-scroll-lock');
   }
 }

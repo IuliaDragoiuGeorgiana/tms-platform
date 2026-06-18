@@ -43,6 +43,15 @@
     } @if (
       currentRole === RoleEnum.MANAGER ||
       currentRole === RoleEnum.DISPECER ||
+      currentRole === RoleEnum.SOFER
+    ) {
+    <a routerLink="/trips" routerLinkActive="active">
+      <span class="nav-icon" aria-hidden="true">⇄</span>
+      <span>{{ 'nav.trips' | translate }}</span>
+    </a>
+    } @if (
+      currentRole === RoleEnum.MANAGER ||
+      currentRole === RoleEnum.DISPECER ||
       currentRole === RoleEnum.CLIENT
     ) {
     <a routerLink="/orders" routerLinkActive="active">

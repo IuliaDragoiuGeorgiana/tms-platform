@@ -31,6 +31,11 @@ from app.models.trip import Trip, TripStatusEnum
 
 router = APIRouter(prefix="/planning", tags=["Planning"])
 
+PLANNING_POOL_STATUSES = (
+    OrderStatusEnum.PENDING,
+    OrderStatusEnum.FAILED,
+)
+
 
 @router.post("/generate", status_code=status.HTTP_201_CREATED)
 def generate_plan(
@@ -106,10 +111,11 @@ def get_eligible_orders(
             detail=f"Intervalul nu poate depăși {max_days} zile",
         )
 
-    # Ia toate comenzile PENDING, neproblematice, din compania dispecerului
+ 
+    # Ia toate comenzile neproblematice care pot intra în planning/retry.
     orders = db.query(Order).filter(
         Order.company_id == current_user.company_id,
-        Order.status == OrderStatusEnum.PENDING,
+        Order.status.in_(PLANNING_POOL_STATUSES),
         Order.is_problematic.is_(False),
     ).all()
 
@@ -160,6 +166,7 @@ def get_eligible_orders(
             id=order.id,
             order_ref=order.order_ref,
             client_name=client_name,
+            status=order.status.value if hasattr(order.status, "value") else str(order.status),
             address_pickup=order.address_pickup,
             address_delivery=order.address_delivery,
             pickup_county=order.pickup_county,

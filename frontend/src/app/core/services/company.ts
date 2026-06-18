@@ -10,6 +10,10 @@ export interface CreateCompanyRequest {
   plan: string;
   max_vehicles: number;
   max_users: number;
+  depot_county?: string | null;
+  depot_city?: string | null;
+  depot_street?: string | null;
+  depot_number?: string | null;
 }
 
 export interface UpdateCompanyRequest {
@@ -18,6 +22,10 @@ export interface UpdateCompanyRequest {
   plan?: string;
   max_vehicles?: number;
   max_users?: number;
+  depot_county?: string | null;
+  depot_city?: string | null;
+  depot_street?: string | null;
+  depot_number?: string | null;
 }
 
 export interface CompanyResponse {
@@ -28,6 +36,12 @@ export interface CompanyResponse {
   plan: string;
   max_vehicles: number | null;
   max_users: number | null;
+  depot_county: string | null;
+  depot_city: string | null;
+  depot_street: string | null;
+  depot_number: string | null;
+  depot_lat: number | null;
+  depot_lon: number | null;
   managers_count: number;
   users_count: number;
   dispatchers_count: number;

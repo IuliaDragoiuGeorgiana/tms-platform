@@ -41,6 +41,10 @@ export class Planning implements OnInit, OnDestroy {
   isGeneratingPlan = false;
   isLoadingTripStops = false;
   isSavingTripEdits = false;
+  removingTripOrderId: string | null = null;
+  pendingRemoveTripOrderId: string | null = null;
+  isAddTripOrderWindowOpen = false;
+  addingTripOrderId: string | null = null;
   approvingTripId: string | null = null;
   eligibleOrdersError = '';
   proposedTripsError = '';
@@ -60,6 +64,10 @@ export class Planning implements OnInit, OnDestroy {
   selectedEditTripStops: TripStopResponse[] = [];
   editTripDriverId = '';
   editTripVehicleId = '';
+  originalEditTripDriverId = '';
+  originalEditTripVehicleId = '';
+  isEditTripDriverDirty = false;
+  isEditTripVehicleDirty = false;
   strategyComparison: StrategyComparisonResponse | null = null;
   readonly today = this.toDateInputValue(new Date());
   dateStart = this.today;
@@ -208,9 +216,17 @@ export class Planning implements OnInit, OnDestroy {
     this.selectedEditTrip = trip;
     this.editTripDriverId = trip.driver_id ?? '';
     this.editTripVehicleId = trip.vehicle_id ?? '';
+    this.originalEditTripDriverId = trip.driver_id ?? '';
+    this.originalEditTripVehicleId = trip.vehicle_id ?? '';
+    this.isEditTripDriverDirty = false;
+    this.isEditTripVehicleDirty = false;
     this.selectedEditTripStops = [];
     this.editTripError = '';
     this.editTripSuccess = '';
+    this.pendingRemoveTripOrderId = null;
+    this.removingTripOrderId = null;
+    this.isAddTripOrderWindowOpen = false;
+    this.addingTripOrderId = null;
     this.isLoadingTripStops = true;
     this.lockBackgroundScroll();
     this.changeDetectorRef.detectChanges();
@@ -234,8 +250,16 @@ export class Planning implements OnInit, OnDestroy {
     this.selectedEditTripStops = [];
     this.editTripDriverId = '';
     this.editTripVehicleId = '';
+    this.originalEditTripDriverId = '';
+    this.originalEditTripVehicleId = '';
+    this.isEditTripDriverDirty = false;
+    this.isEditTripVehicleDirty = false;
     this.editTripError = '';
     this.editTripSuccess = '';
+    this.pendingRemoveTripOrderId = null;
+    this.removingTripOrderId = null;
+    this.isAddTripOrderWindowOpen = false;
+    this.addingTripOrderId = null;
     this.isLoadingTripStops = false;
     this.unlockBackgroundScroll();
     this.changeDetectorRef.detectChanges();
@@ -243,6 +267,7 @@ export class Planning implements OnInit, OnDestroy {
 
   updateEditTripDriver(value: string): void {
     this.editTripDriverId = value;
+    this.isEditTripDriverDirty = value !== this.originalEditTripDriverId;
     this.editTripError = '';
     this.editTripSuccess = '';
     this.changeDetectorRef.detectChanges();
@@ -250,6 +275,7 @@ export class Planning implements OnInit, OnDestroy {
 
   updateEditTripVehicle(value: string): void {
     this.editTripVehicleId = value;
+    this.isEditTripVehicleDirty = value !== this.originalEditTripVehicleId;
     this.editTripError = '';
     this.editTripSuccess = '';
     this.changeDetectorRef.detectChanges();
@@ -258,10 +284,7 @@ export class Planning implements OnInit, OnDestroy {
   hasTripEditChanges(): boolean {
     return Boolean(
       this.selectedEditTrip &&
-      (
-        this.editTripDriverId !== (this.selectedEditTrip.driver_id ?? '') ||
-        this.editTripVehicleId !== (this.selectedEditTrip.vehicle_id ?? '')
-      ),
+      (this.isEditTripDriverDirty || this.isEditTripVehicleDirty),
     );
   }
 
@@ -274,11 +297,11 @@ export class Planning implements OnInit, OnDestroy {
 
     const requests = [];
 
-    if (this.editTripDriverId && this.editTripDriverId !== (trip.driver_id ?? '')) {
+    if (this.editTripDriverId && this.editTripDriverId !== this.originalEditTripDriverId) {
       requests.push(this.planningService.changeTripDriver(trip.id, this.editTripDriverId));
     }
 
-    if (this.editTripVehicleId && this.editTripVehicleId !== (trip.vehicle_id ?? '')) {
+    if (this.editTripVehicleId && this.editTripVehicleId !== this.originalEditTripVehicleId) {
       requests.push(this.planningService.changeTripVehicle(trip.id, this.editTripVehicleId));
     }
 
@@ -300,6 +323,10 @@ export class Planning implements OnInit, OnDestroy {
         };
 
         this.selectedEditTrip = updatedTrip;
+        this.originalEditTripDriverId = this.editTripDriverId;
+        this.originalEditTripVehicleId = this.editTripVehicleId;
+        this.isEditTripDriverDirty = false;
+        this.isEditTripVehicleDirty = false;
         this.proposedTrips = this.proposedTrips.map((currentTrip) =>
           currentTrip.id === updatedTrip.id ? updatedTrip : currentTrip,
         );
@@ -309,6 +336,138 @@ export class Planning implements OnInit, OnDestroy {
       },
       error: (error: HttpErrorResponse) => {
         this.isSavingTripEdits = false;
+        this.editTripError = error.error?.detail ?? 'common.error_generic';
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
+  getTripOrderIds(): string[] {
+    const orderIds = new Set<string>();
+
+    this.selectedEditTripStops.forEach((stop) => orderIds.add(stop.order_id));
+
+    return [...orderIds];
+  }
+
+  getAvailableTripOrders(): EligibleOrderSummary[] {
+    const existingOrderIds = new Set(this.getTripOrderIds());
+
+    return this.planningQueue.filter((order) => !existingOrderIds.has(order.id));
+  }
+
+  getTripOrderStopSummary(orderId: string): string {
+    return this.selectedEditTripStops
+      .filter((stop) => stop.order_id === orderId)
+      .map((stop) => `${stop.stop_type} #${stop.sequence}`)
+      .join(', ');
+  }
+
+  requestRemoveTripOrder(orderId: string): void {
+    if (this.pendingRemoveTripOrderId !== orderId) {
+      this.pendingRemoveTripOrderId = orderId;
+      this.editTripError = '';
+      this.editTripSuccess = '';
+      this.changeDetectorRef.detectChanges();
+      return;
+    }
+
+    this.removeTripOrder(orderId);
+  }
+
+  cancelRemoveTripOrder(): void {
+    this.pendingRemoveTripOrderId = null;
+    this.changeDetectorRef.detectChanges();
+  }
+
+  openAddTripOrderWindow(): void {
+    this.isAddTripOrderWindowOpen = true;
+    this.addingTripOrderId = null;
+    this.editTripError = '';
+    this.editTripSuccess = '';
+    this.loadEligibleOrders();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  closeAddTripOrderWindow(): void {
+    this.isAddTripOrderWindowOpen = false;
+    this.addingTripOrderId = null;
+    this.changeDetectorRef.detectChanges();
+  }
+
+  addOrderToTrip(order: EligibleOrderSummary): void {
+    const trip = this.selectedEditTrip;
+
+    if (!trip || this.addingTripOrderId) {
+      return;
+    }
+
+    this.addingTripOrderId = order.id;
+    this.editTripError = '';
+    this.editTripSuccess = '';
+    this.changeDetectorRef.detectChanges();
+
+    this.planningService.addOrderToTrip(trip.id, order.id).subscribe({
+      next: () => {
+        this.addingTripOrderId = null;
+        this.isAddTripOrderWindowOpen = false;
+        this.editTripSuccess = 'planning.trip_order_add_success';
+        this.reloadSelectedTripStops(trip.id);
+        this.loadEligibleOrders();
+        this.loadProposedTrips();
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.addingTripOrderId = null;
+        this.editTripError = error.error?.detail ?? 'common.error_generic';
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
+  private removeTripOrder(orderId: string): void {
+    const trip = this.selectedEditTrip;
+
+    if (!trip) {
+      return;
+    }
+
+    this.removingTripOrderId = orderId;
+    this.editTripError = '';
+    this.editTripSuccess = '';
+    this.changeDetectorRef.detectChanges();
+
+    this.planningService.removeOrderFromTrip(trip.id, orderId).subscribe({
+      next: () => {
+        this.selectedEditTripStops = this.selectedEditTripStops.filter((stop) => stop.order_id !== orderId);
+        this.pendingRemoveTripOrderId = null;
+        this.removingTripOrderId = null;
+        this.editTripSuccess = 'planning.trip_order_remove_success';
+        this.reloadSelectedTripStops(trip.id);
+        this.loadEligibleOrders();
+        this.loadProposedTrips();
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.removingTripOrderId = null;
+        this.editTripError = error.error?.detail ?? 'common.error_generic';
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
+  private reloadSelectedTripStops(tripId: string): void {
+    this.isLoadingTripStops = true;
+    this.changeDetectorRef.detectChanges();
+
+    this.tripService.listTripStops(tripId).subscribe({
+      next: (stops) => {
+        this.selectedEditTripStops = stops;
+        this.isLoadingTripStops = false;
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.isLoadingTripStops = false;
         this.editTripError = error.error?.detail ?? 'common.error_generic';
         this.changeDetectorRef.detectChanges();
       },

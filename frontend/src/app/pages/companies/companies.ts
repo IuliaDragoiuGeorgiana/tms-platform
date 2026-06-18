@@ -19,8 +19,13 @@ interface Company {
   slug: string;
   plan: string;
   vatId?: string;
-  city?: string;
-  country?: string;
+  depotCounty?: string;
+  depotCity?: string;
+  depotStreet?: string;
+  depotNumber?: string;
+  depotLatitude?: number | null;
+  depotLongitude?: number | null;
+  depotLocation?: string;
   isActive: boolean;
   statusKey: string;
   managers: number;
@@ -81,6 +86,10 @@ export class Companies implements OnInit {
       plan: ['FREE', [Validators.required]],
       max_vehicles: [10, [Validators.required, Validators.min(1)]],
       max_users: [20, [Validators.required, Validators.min(1)]],
+      depot_county: [''],
+      depot_city: [''],
+      depot_street: [''],
+      depot_number: [''],
     });
 
     this.editCompanyForm = this.fb.group({
@@ -89,6 +98,10 @@ export class Companies implements OnInit {
       is_active: [true],
       max_vehicles: [10, [Validators.required, Validators.min(1)]],
       max_users: [20, [Validators.required, Validators.min(1)]],
+      depot_county: [''],
+      depot_city: [''],
+      depot_street: [''],
+      depot_number: [''],
     });
 
     this.inviteManagerForm = this.fb.group({
@@ -118,8 +131,11 @@ export class Companies implements OnInit {
         company.slug,
         company.plan,
         company.vatId ?? '',
-        company.city ?? '',
-        company.country ?? '',
+        company.depotCounty ?? '',
+        company.depotCity ?? '',
+        company.depotStreet ?? '',
+        company.depotNumber ?? '',
+        company.depotLocation ?? '',
         company.statusKey,
         String(company.managers),
         String(company.dispatchers),
@@ -189,6 +205,10 @@ export class Companies implements OnInit {
       plan: 'FREE',
       max_vehicles: 10,
       max_users: 20,
+      depot_county: '',
+      depot_city: '',
+      depot_street: '',
+      depot_number: '',
     });
   }
 
@@ -248,6 +268,10 @@ export class Companies implements OnInit {
       is_active: company.isActive,
       max_vehicles: company.maxVehicles,
       max_users: company.maxUsers,
+      depot_county: company.depotCounty ?? '',
+      depot_city: company.depotCity ?? '',
+      depot_street: company.depotStreet ?? '',
+      depot_number: company.depotNumber ?? '',
     });
   }
 
@@ -261,6 +285,10 @@ export class Companies implements OnInit {
       is_active: true,
       max_vehicles: 10,
       max_users: 20,
+      depot_county: '',
+      depot_city: '',
+      depot_street: '',
+      depot_number: '',
     });
   }
 
@@ -296,7 +324,18 @@ export class Companies implements OnInit {
       return;
     }
 
-    const payload = this.companyForm.value as CreateCompanyRequest;
+    const formValue = this.companyForm.value;
+    const payload: CreateCompanyRequest = {
+      name: formValue.name ?? '',
+      slug: formValue.slug ?? '',
+      plan: formValue.plan ?? 'FREE',
+      max_vehicles: formValue.max_vehicles ?? 10,
+      max_users: formValue.max_users ?? 20,
+      depot_county: this.emptyToNull(formValue.depot_county),
+      depot_city: this.emptyToNull(formValue.depot_city),
+      depot_street: this.emptyToNull(formValue.depot_street),
+      depot_number: this.emptyToNull(formValue.depot_number),
+    };
 
     this.isCreatingCompany = true;
 
@@ -344,6 +383,10 @@ export class Companies implements OnInit {
       is_active: Boolean(formValue.is_active),
       max_vehicles: formValue.max_vehicles ?? 10,
       max_users: formValue.max_users ?? 20,
+      depot_county: this.emptyToNull(formValue.depot_county),
+      depot_city: this.emptyToNull(formValue.depot_city),
+      depot_street: this.emptyToNull(formValue.depot_street),
+      depot_number: this.emptyToNull(formValue.depot_number),
     };
 
     this.isUpdatingCompany = true;
@@ -468,6 +511,13 @@ export class Companies implements OnInit {
       name: company.name,
       slug: company.slug,
       plan: company.plan,
+      depotCounty: company.depot_county ?? undefined,
+      depotCity: company.depot_city ?? undefined,
+      depotStreet: company.depot_street ?? undefined,
+      depotNumber: company.depot_number ?? undefined,
+      depotLatitude: company.depot_lat,
+      depotLongitude: company.depot_lon,
+      depotLocation: this.formatDepotLocation(company),
       isActive: company.is_active,
       statusKey: company.is_active ? 'companies.status.active' : 'companies.status.disabled',
       managers: company.managers_count ?? 0,
@@ -479,5 +529,22 @@ export class Companies implements OnInit {
       maxVehicles: company.max_vehicles ?? 0,
       ordersThisMonth: 0,
     };
+  }
+
+  private emptyToNull(value: string | null | undefined): string | null {
+    const trimmedValue = value?.trim();
+    return trimmedValue ? trimmedValue : null;
+  }
+
+  private formatDepotLocation(company: CompanyResponse): string {
+    return [
+      company.depot_street,
+      company.depot_number,
+      company.depot_city,
+      company.depot_county,
+    ]
+      .map((value) => value?.trim())
+      .filter(Boolean)
+      .join(', ');
   }
 }

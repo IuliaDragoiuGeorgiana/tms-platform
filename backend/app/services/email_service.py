@@ -13,7 +13,11 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader
+try:
+    from jinja2 import Environment, FileSystemLoader
+except ModuleNotFoundError:
+    Environment = None
+    FileSystemLoader = None
 
 from app.core.config import (
     SMTP_HOST,
@@ -32,9 +36,13 @@ logger = logging.getLogger(__name__)
 TEMPLATE_DIR = Path(__file__).parent.parent / "email_templates"
 
 # Jinja2 environment
-jinja_env = Environment(
-    loader=FileSystemLoader(TEMPLATE_DIR),
-    autoescape=True,
+jinja_env = (
+    Environment(
+        loader=FileSystemLoader(TEMPLATE_DIR),
+        autoescape=True,
+    )
+    if Environment and FileSystemLoader
+    else None
 )
 
 
@@ -49,12 +57,23 @@ def render_template(template_name: str, context: dict) -> str:
     Returns:
         Rendered HTML string
     """
+    if not jinja_env:
+        raise RuntimeError("Jinja2 is not installed. Install backend requirements to enable email templates.")
+
     # Add global context variables
     context.setdefault("current_year", datetime.now().year)
     context.setdefault("frontend_url", FRONTEND_BASE_URL)
 
     template = jinja_env.get_template(template_name)
     return template.render(context)
+
+
+def try_render_template(template_name: str, context: dict) -> str | None:
+    try:
+        return render_template(template_name, context)
+    except Exception as e:
+        logger.error(f"Failed to render email template {template_name}: {str(e)}")
+        return None
 
 
 def send_email(
@@ -133,7 +152,9 @@ def send_password_reset_email(
         "reset_link": reset_link,
     }
 
-    html_content = render_template("password_reset.html", context)
+    html_content = try_render_template("password_reset.html", context)
+    if not html_content:
+        return False
 
     return send_email(
         to_email=to_email,
@@ -168,7 +189,9 @@ def send_temporary_password_email(
         "login_url": login_url,
     }
 
-    html_content = render_template("temporary_password.html", context)
+    html_content = try_render_template("temporary_password.html", context)
+    if not html_content:
+        return False
 
     return send_email(
         to_email=to_email,
@@ -199,7 +222,9 @@ def send_client_approved_email(
         "login_url": login_url,
     }
 
-    html_content = render_template("client_approved.html", context)
+    html_content = try_render_template("client_approved.html", context)
+    if not html_content:
+        return False
 
     return send_email(
         to_email=to_email,

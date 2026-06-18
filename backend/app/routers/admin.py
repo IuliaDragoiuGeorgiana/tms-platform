@@ -1,14 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 import uuid
 
+from app.core.security import generate_temporary_password, hash_password
 from app.database import get_db
-from app.models.user import User, RoleEnum
-from app.schemas.auth import InviteUserRequest, UserResponse
-from app.core.security import hash_password, generate_temporary_password
 from app.dependencies import require_roles
-from app.services.email_service import send_temporary_password_email, send_client_approved_email
 from app.models.company import Company
+from app.models.user import RoleEnum, User
+from app.schemas.auth import InviteUserRequest, UserResponse
+from app.services.email_service import (
+    send_client_approved_email,
+    send_temporary_password_email,
+)
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -29,7 +32,11 @@ def invite_user(
     - MANAGER poate crea DISPECER sau SOFER (în compania lui)
     User-ul creat va fi forțat să-și schimbe parola la prima logare.
     """
-    current_role = current_user.role.value if hasattr(current_user.role, 'value') else str(current_user.role)
+    current_role = (
+        current_user.role.value
+        if hasattr(current_user.role, "value")
+        else str(current_user.role)
+    )
 
     # Validare rol permis pentru a fi invitat
     if current_role == "SUPER_ADMIN":
@@ -58,7 +65,6 @@ def invite_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Nu poți invita useri într-o companie dezactivată",
             )
-        
 
     elif current_role == "MANAGER":
         if data.role not in ("DISPECER", "SOFER"):
@@ -90,7 +96,7 @@ def invite_user(
         role=RoleEnum(data.role),
         company_id=target_company_id,
         is_active=True,
-        is_approved=True,       # invitat de admin → automat aprobat
+        is_approved=True,  # invitat de admin → automat aprobat
         must_change_password=True,  # forțat să schimbe parola
         invited_by_id=current_user.id,
         phone=data.phone,
@@ -99,6 +105,9 @@ def invite_user(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    print("tmppwd: ", temp_password)
+    print("email: ", new_user.email)
 
     email_sent = send_temporary_password_email(
         to_email=new_user.email,
@@ -110,7 +119,9 @@ def invite_user(
         "message": "Cont creat cu succes. Parola temporară a fost trimisă pe email.",
         "user_id": str(new_user.id),
         "email": new_user.email,
-        "role": new_user.role.value if hasattr(new_user.role, "value") else str(new_user.role),
+        "role": new_user.role.value
+        if hasattr(new_user.role, "value")
+        else str(new_user.role),
         "must_change_password": new_user.must_change_password,
         "email_sent": email_sent,
     }
@@ -131,7 +142,11 @@ def approve_user(
     if not user:
         raise HTTPException(status_code=404, detail="User inexistent")
 
-    current_role = current_user.role.value if hasattr(current_user.role, 'value') else str(current_user.role)
+    current_role = (
+        current_user.role.value
+        if hasattr(current_user.role, "value")
+        else str(current_user.role)
+    )
 
     target_role = user.role.value if hasattr(user.role, "value") else str(user.role)
 
@@ -163,6 +178,7 @@ def approve_user(
 
     return user
 
+
 @router.patch("/users/{user_id}/activate", response_model=UserResponse)
 def activate_user(
     user_id: uuid.UUID,
@@ -183,7 +199,11 @@ def activate_user(
             detail="User inexistent",
         )
 
-    current_role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    current_role = (
+        current_user.role.value
+        if hasattr(current_user.role, "value")
+        else str(current_user.role)
+    )
     target_role = user.role.value if hasattr(user.role, "value") else str(user.role)
 
     if current_role == "SUPER_ADMIN":
@@ -245,7 +265,11 @@ def deactivate_user(
             detail="Nu îți poți dezactiva propriul cont",
         )
 
-    current_role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    current_role = (
+        current_user.role.value
+        if hasattr(current_user.role, "value")
+        else str(current_user.role)
+    )
     target_role = user.role.value if hasattr(user.role, "value") else str(user.role)
 
     if current_role == "SUPER_ADMIN":
@@ -280,6 +304,7 @@ def deactivate_user(
 
     return user
 
+
 @router.get("/users/employees", response_model=list[UserResponse])
 def list_company_employees(
     db: Session = Depends(get_db),
@@ -300,6 +325,7 @@ def list_company_employees(
 
     return employees
 
+
 @router.get("/clients", response_model=list[UserResponse])
 def list_company_clients(
     db: Session = Depends(get_db),
@@ -313,7 +339,11 @@ def list_company_clients(
         User.role == RoleEnum.CLIENT,
     )
 
-    current_role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    current_role = (
+        current_user.role.value
+        if hasattr(current_user.role, "value")
+        else str(current_user.role)
+    )
 
     if current_role != "SUPER_ADMIN":
         query = query.filter(User.company_id == current_user.company_id)

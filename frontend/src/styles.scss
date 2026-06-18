@@ -29,3 +29,162 @@ body {
 body.modal-scroll-lock {
   overflow: hidden;
 }
+
+.trip-row[class*='trip-status-'] {
+  border-left-width: 5px;
+}
+
+.trip-row-meta {
+  align-content: start;
+  justify-items: end;
+}
+
+.status-badge[class*='trip-status-'] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-height: 28px;
+  border: 1px solid color-mix(in srgb, var(--trip-status-color) 28%, transparent);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--trip-status-color) 13%, white);
+  color: var(--trip-status-text);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.trip-status-proposed {
+  border-left-color: var(--color-warning);
+  --trip-status-color: var(--color-warning);
+  --trip-status-text: #92400e;
+}
+
+.trip-status-approved {
+  border-left-color: var(--color-primary);
+  --trip-status-color: var(--color-primary);
+  --trip-status-text: var(--color-primary-dark);
+}
+
+.trip-status-in-progress {
+  border-left-color: var(--color-success);
+  --trip-status-color: var(--color-success);
+  --trip-status-text: #166534;
+}
+
+.trip-status-completed {
+  border-left-color: #0f766e;
+  --trip-status-color: #0f766e;
+  --trip-status-text: #115e59;
+}
+
+.trip-status-interrupted {
+  border-left-color: #ea580c;
+  --trip-status-color: #ea580c;
+  --trip-status-text: #9a3412;
+}
+
+.trip-status-cancelled {
+  border-left-color: var(--color-danger);
+  --trip-status-color: var(--color-danger);
+  --trip-status-text: #991b1b;
+}
+
+.trips-page .stop-row {
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+}
+
+.trips-page .stop-row div {
+  display: grid;
+  gap: 5px;
+}
+
+.stop-row-disabled {
+  opacity: 0.58;
+}
+
+.stop-arrive-action {
+  border-color: var(--color-success);
+  background: rgba(22, 163, 74, 0.12);
+  color: #166534;
+}
+
+.stop-arrive-action:disabled {
+  border-color: rgba(22, 163, 74, 0.28);
+  background: rgba(22, 163, 74, 0.08);
+  color: rgba(22, 101, 52, 0.62);
+}
+
+.trips-page .stop-arrived-action:disabled {
+  border-style: solid;
+  border-color: var(--color-success);
+  background: rgba(22, 163, 74, 0.18);
+  color: #166534;
+}
+
+.stop-complete-action {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  color: var(--color-primary-dark);
+}
+
+.stop-fail-action {
+  border-color: var(--color-danger);
+  background: rgba(220, 38, 38, 0.1);
+  color: #991b1b;
+}
+
+.trips-page .stop-complete-action.stop-complete-disabled,
+.trips-page .stop-complete-action:disabled,
+.trips-page .stop-fail-action.stop-fail-disabled,
+.trips-page .stop-fail-action:disabled {
+  border-style: dashed;
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+  color: #94a3b8;
+  box-shadow: none;
+}
+
+.stop-arrive-action:disabled,
+.stop-complete-action:disabled,
+.stop-fail-action:disabled {
+  cursor: not-allowed;
+}
+
+.trips-page textarea {
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--color-background);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.fail-stop-form {
+  display: grid;
+  gap: 14px;
+}
+
+.fail-stop-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.fail-stop-form select {
+  min-height: 40px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--color-background);
+  color: var(--color-text);
+}
+
+.fail-primary-action {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+}

@@ -10,6 +10,11 @@
   </div>
 
   <div class="action-strip">
+    @if (isManager) {
+    <button type="button" (click)="openServiceTimeWindow()">
+      {{ 'dashboard.action.service_time' | translate }}
+    </button>
+    }
     @for (action of dashboard.actions; track action) {
     <button type="button">{{ action | translate }}</button>
     }
@@ -62,4 +67,91 @@
       </ul>
     </section>
   </div>
+
+  @if (isServiceTimeWindowOpen) {
+  <div
+    style="position: fixed; inset: 0; z-index: 1000; background: rgba(15, 23, 42, 0.45);"
+    (click)="closeServiceTimeWindow()"
+  ></div>
+
+  <section
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'dashboard.service_time.title' | translate"
+    style="position: fixed; inset: 12vh 50% auto auto; width: min(680px, calc(100vw - 32px)); transform: translateX(50%); z-index: 1001; max-height: 76vh; overflow: auto; padding: 20px; border-radius: 8px; background: var(--color-surface);"
+    (click)="$event.stopPropagation()"
+  >
+    <div style="display: flex; justify-content: space-between; gap: 16px; margin-bottom: 16px;">
+      <div style="display: grid; gap: 6px;">
+        <h2 style="margin: 0; font-size: 20px;">{{ 'dashboard.service_time.title' | translate }}</h2>
+        <span style="color: var(--color-text-muted); line-height: 1.4;">{{ 'dashboard.service_time.description' | translate }}</span>
+      </div>
+      <button
+        type="button"
+        style="border: 1px solid var(--color-border); border-radius: 8px; padding: 10px; background: var(--color-surface); color: var(--color-text); cursor: pointer;"
+        (click)="closeServiceTimeWindow()"
+      >
+        {{ 'orders.close' | translate }}
+      </button>
+    </div>
+
+    @if (serviceTimeError) {
+    <div style="margin-bottom: 14px; padding: 12px; border-radius: 8px; background: rgba(220, 38, 38, 0.1); color: var(--color-danger);">{{ serviceTimeError | translate }}</div>
+    }
+    @if (serviceTimeSuccess) {
+    <div style="margin-bottom: 14px; padding: 12px; border-radius: 8px; background: rgba(22, 163, 74, 0.1); color: var(--color-success);">{{ serviceTimeSuccess | translate }}</div>
+    }
+
+    @if (isLoadingServiceTimes) {
+    <div style="margin: 0; padding: 20px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background); color: var(--color-text-muted);">
+      <h2>{{ 'dashboard.service_time.loading' | translate }}</h2>
+    </div>
+    } @else {
+    <div class="service-time-groups">
+      @for (group of serviceTimeGroups; track group.title) {
+      <section class="service-time-group">
+        <h3>{{ group.title | translate }}</h3>
+        <div class="service-time-list">
+          @for (row of group.rows; track row.label) {
+          <label class="service-time-field">
+            <span>{{ row.label | translate }}</span>
+            <div>
+              <input
+                type="number"
+                min="1"
+                max="240"
+                [value]="row.value"
+                [disabled]="isSavingServiceTimes"
+                (input)="updateServiceTimeValue(row.key, $any($event.target).value)"
+              />
+              <small>{{ 'planning.minutes_short' | translate }}</small>
+            </div>
+          </label>
+          }
+        </div>
+      </section>
+      } @empty {
+      <p style="margin: 0; padding: 20px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background); color: var(--color-text-muted);">{{ 'dashboard.service_time.empty' | translate }}</p>
+      }
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+      <button
+        type="button"
+        style="border: 1px solid var(--color-primary); border-radius: 8px; padding: 10px 14px; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer;"
+        [disabled]="!hasServiceTimeChanges() || isSavingServiceTimes"
+        [style.opacity]="!hasServiceTimeChanges() || isSavingServiceTimes ? '0.55' : '1'"
+        [style.cursor]="!hasServiceTimeChanges() || isSavingServiceTimes ? 'not-allowed' : 'pointer'"
+        (click)="saveServiceTimes()"
+      >
+        {{
+          isSavingServiceTimes
+            ? ('dashboard.service_time.saving' | translate)
+            : ('dashboard.service_time.save' | translate)
+        }}
+      </button>
+    </div>
+    }
+  </section>
+  }
 </section>

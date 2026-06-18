@@ -27,6 +27,10 @@ LOCAL_TZ = ZoneInfo("Europe/Bucharest")
 DEFAULT_BREAK_MINUTES = 30
 DEFAULT_TRAVEL_BUFFER_MINUTES = 30
 DEFAULT_WAITING_BUFFER_MINUTES = 15
+PLANNING_POOL_STATUSES = (
+    OrderStatusEnum.PENDING,
+    OrderStatusEnum.FAILED,
+)
 
 
 
@@ -2369,9 +2373,9 @@ def add_order_to_trip(
     if not order_to_add:
         raise ValueError("Comanda nu a fost găsită")
 
-    if order_to_add.status != OrderStatusEnum.PENDING:
+    if order_to_add.status not in PLANNING_POOL_STATUSES:
         raise ValueError(
-            f"Comanda nu poate fi adăugată deoarece nu este PENDING. "
+            f"Comanda nu poate fi adăugată deoarece nu este PENDING sau FAILED. "
             f"Status actual: {order_to_add.status.value}"
         )
 
@@ -3549,12 +3553,12 @@ def run_planning(
     # PAS 1: Comenzi eligibile
     orders = db.query(Order).filter(
         Order.company_id == company_id,
-        Order.status == OrderStatusEnum.PENDING,
+        Order.status.in_(PLANNING_POOL_STATUSES),
         Order.is_problematic.is_(False),
     ).all()
 
     if not orders:
-        return {"error": "Nu există comenzi PENDING pentru planificare"}
+        return {"error": "Nu există comenzi PENDING sau FAILED pentru planificare"}
 
     eligible_orders = []
     for order in orders:
