@@ -13,7 +13,7 @@ from app.services.planning_service import (
     change_trip_vehicle,
     remove_order_from_trip,
     add_order_to_trip,
-    create_ad_hoc_trip,
+    create_adhoc_planning_session,
 )
 from app.schemas.planning import (
     EligibleOrdersRequest,
@@ -40,7 +40,7 @@ def generate_plan(
 ):
     """
     Generează un plan de livrare pentru o zi specifică.
-    
+
     Pipeline complet:
     1. Ia comenzile PENDING din compania ta
     2. Geocodează adresele care nu au coordonate GPS
@@ -48,7 +48,7 @@ def generate_plan(
     4. Optimizează ordinea stopurilor per cursă (OR-Tools VRP)
     5. Calculează ETA per stop
     6. Salvează totul în DB (PlanningSession + Trips + TripStops)
-    
+
     Doar DISPECER și MANAGER pot genera planuri.
     """
     if planned_date < date.today():
@@ -79,10 +79,10 @@ def get_eligible_orders(
 ):
     """
     Returnează comenzile eligibile pentru planificare într-un interval de date.
- 
+
     Dispecerul trimite date_start și date_end, și primește înapoi
     lista de comenzi PENDING care pot fi livrate în acel interval.
- 
+
     O comandă e eligibilă dacă:
     1. E PENDING (nu e deja planificată, livrată sau anulată)
     2. Nu e marcată ca problematică
@@ -90,14 +90,14 @@ def get_eligible_orders(
        SAU are flexibility_days care îi permite livrare în acel interval
     4. Earliest_delivery_date (dacă există) permite livrarea în interval
     """
- 
+
     # Validare: nu poți planifica în trecut
     if body.date_start < date.today():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Nu poți planifica pentru o dată din trecut",
         )
- 
+
     # Validare: intervalul nu poate fi mai mare de 7 zile
     max_days = 7
     if (body.date_end - body.date_start).days >= max_days:
@@ -105,17 +105,17 @@ def get_eligible_orders(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Intervalul nu poate depăși {max_days} zile",
         )
- 
+
     # Ia toate comenzile PENDING, neproblematice, din compania dispecerului
     orders = db.query(Order).filter(
         Order.company_id == current_user.company_id,
         Order.status == OrderStatusEnum.PENDING,
         Order.is_problematic.is_(False),
     ).all()
- 
+
     # Filtrare în Python pentru logica de eligibilitate cu flexibility_days
     eligible = []
- 
+
     for order in orders:
         # Calculează intervalul în care comanda poate fi livrată
         # Exemplu: deadline = 20 iunie, flexibility = 3
@@ -123,25 +123,25 @@ def get_eligible_orders(
         order_earliest = order.delivery_deadline - timedelta(
             days=order.flexibility_days
         )
- 
+
         if order.earliest_delivery_date:
             order_earliest = max(order_earliest, order.earliest_delivery_date)
- 
+
         order_latest = order.delivery_deadline
- 
+
         # Verifică dacă intervalul comenzii se suprapune cu intervalul cerut
         if order_earliest <= body.date_end and order_latest >= body.date_start:
             eligible.append(order)
- 
+
     # Construiește răspunsul
     order_summaries = []
     by_priority = {"CRITIC": 0, "URGENT": 0, "NORMAL": 0}
- 
+
     for order in eligible:
         client_name = None
         if order.client:
             client_name = order.client.full_name
- 
+
         priority_value = (
             order.priority.value
             if hasattr(order.priority, "value")
@@ -152,10 +152,10 @@ def get_eligible_orders(
             if hasattr(order.type_marfa, "value")
             else str(order.type_marfa)
         )
- 
+
         if priority_value in by_priority:
             by_priority[priority_value] += 1
- 
+
         order_summaries.append(EligibleOrderSummary(
             id=order.id,
             order_ref=order.order_ref,
@@ -182,13 +182,13 @@ def get_eligible_orders(
             delivery_time_window_start=order.delivery_time_window_start,
             delivery_time_window_end=order.delivery_time_window_end,
         ))
- 
+
     # Sortează: CRITIC primele, apoi URGENT, apoi NORMAL, apoi deadline
     priority_order = {"CRITIC": 0, "URGENT": 1, "NORMAL": 2}
     order_summaries.sort(
         key=lambda o: (priority_order.get(o.priority, 2), o.delivery_deadline)
     )
- 
+
     return EligibleOrdersResponse(
         date_start=body.date_start,
         date_end=body.date_end,
@@ -217,8 +217,6 @@ def compare_strategies(
             detail="Data de final nu poate fi înaintea datei de început",
         )
 
-    # Warm-up: rulează o planificare dry-run ca să se facă geocodarea
-    # și să se salveze coordonatele lipsă înainte de comparația strategiilor.
     warmup_result = run_planning(
         db=db,
         company_id=current_user.company_id,
@@ -287,7 +285,7 @@ def compare_strategies(
         "date_end": str(body.date_end),
         "variants": variants,
     }
- 
+
 @router.post("/generate-with-strategy", status_code=status.HTTP_201_CREATED)
 def generate_with_strategy(
     body: GeneratePlanRequest,
@@ -296,10 +294,10 @@ def generate_with_strategy(
 ):
     """
     Generează planul real cu strategia aleasă de dispecer.
- 
+
     Apelat după ce dispecerul a comparat strategiile cu
     POST /planning/compare-strategies și a ales una.
- 
+
     Salvează planul în DB ca PROPOSED.
     """
     if body.date_start < date.today():
@@ -307,7 +305,7 @@ def generate_with_strategy(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Nu poți planifica pentru o dată din trecut",
         )
- 
+
     # Convertește string-ul strategiei în enum
     strategy_map = {
         "GREEDY_DEADLINE": PlanningStrategyEnum.GREEDY_DEADLINE,
@@ -321,7 +319,7 @@ def generate_with_strategy(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Strategie invalidă: {body.strategy}",
         )
- 
+
     result = run_planning(
         db=db,
         company_id=current_user.company_id,
@@ -332,7 +330,7 @@ def generate_with_strategy(
         date_start=body.date_start,
         date_end=body.date_end,
     )
- 
+
     if "error" in result:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -536,40 +534,92 @@ def add_order_to_trip_endpoint(
         )
 
 
-@router.post("/sessions/{session_id}/trips/ad-hoc", status_code=status.HTTP_201_CREATED)
-def create_ad_hoc_trip_endpoint(
-    session_id: uuid.UUID,
+@router.post("/ad-hoc/preview", status_code=status.HTTP_200_OK)
+def preview_adhoc_planning_session_endpoint(
     body: CreateAdHocTripRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("DISPECER", "MANAGER")),
 ):
     """
-    Creează un trip nou ad-hoc într-o sesiune PROPOSED.
+    Previzualizează o sesiune ad-hoc înainte de creare.
+
+    Dispecerul selectează:
+    - data;
+    - șoferul;
+    - vehiculul;
+    - una sau mai multe comenzi PENDING.
+
+    Sistemul validează și calculează ruta, dar nu salvează nimic în DB.
+
+    Returnează:
+    - Ruta calculată cu ETA per stop
+    - kg/m3 total și peak
+    - Timp disponibil șofer vs timp necesar
+    - Validări și warnings
+    """
+    try:
+        result = create_adhoc_planning_session(
+            db=db,
+            company_id=current_user.company_id,
+            created_by_id=current_user.id,
+            planned_date=body.planned_date,
+            driver_id=body.driver_id,
+            vehicle_id=body.vehicle_id,
+            order_ids=body.order_ids,
+            dry_run=True,
+        )
+        return result
+
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@router.post("/ad-hoc", status_code=status.HTTP_201_CREATED)
+def create_adhoc_planning_session_endpoint(
+    body: CreateAdHocTripRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("DISPECER", "MANAGER")),
+):
+    """
+    Creează o nouă sesiune de planificare ad-hoc cu un trip.
 
     Dispecerul alege manual:
     - data;
     - șoferul;
     - vehiculul;
-    - comenzile PENDING.
+    - una sau mai multe comenzi PENDING.
 
-    Sistemul validează și optimizează ruta.
+    Sistemul:
+    - validează toate restricțiile (șofer, vehicul, capacitate, time windows, deadline);
+    - geocodează comenzile dacă necesare;
+    - calculează ruta optimă;
+    - creează o nouă PlanningSession (PROPOSED) cu un Trip (PROPOSED) în ea;
+    - marchează comenzile ca PLANNED.
 
     Validări complete:
-    - Sesiunea PROPOSED și în interval corect;
     - Șoferul disponibil și în compania dispecerului;
     - Vehiculul disponibil și în compania dispecerului;
     - Comenzile PENDING, neproblematice, eligibile;
+    - Capacitate vehicul (kg, m³);
+    - Ferestre orare și deadline-uri;
     - Ruta fezabilă și fără overlap cu alte trip-uri ale șoferului.
+
+    După creare, dispecerul aprobă sesiunea cu POST /planning/sessions/{session_id}/approve
     """
     try:
-        result = create_ad_hoc_trip(
+        result = create_adhoc_planning_session(
             db=db,
-            session_id=session_id,
             company_id=current_user.company_id,
+            created_by_id=current_user.id,
             planned_date=body.planned_date,
             driver_id=body.driver_id,
             vehicle_id=body.vehicle_id,
             order_ids=body.order_ids,
+            dry_run=False,
         )
         return result
 

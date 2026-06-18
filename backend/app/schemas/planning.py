@@ -175,15 +175,18 @@ class AddOrderToTripRequest(BaseModel):
     order_id: uuid.UUID
 
 
-class CreateAdHocTripRequest(BaseModel):
+class AdHocTripRequest(BaseModel):
     """
-    Schema pentru crearea unui trip nou ad-hoc într-o sesiune PROPOSED.
+    Schema pentru preview/create sesiune de planificare ad-hoc.
 
-    Dispecerul alege manual:
-    - data trip-ului;
+    Dispecerul selectează:
+    - data planificării;
     - șoferul;
     - vehiculul;
     - una sau mai multe comenzi PENDING.
+
+    Sistemul creează automat o PlanningSession (PROPOSED)
+    cu un Trip (PROPOSED) atunci când dry_run=False.
     """
     planned_date: date
     driver_id: uuid.UUID
@@ -196,3 +199,7 @@ class CreateAdHocTripRequest(BaseModel):
         if not v:
             raise ValueError("Trebuie selectată cel puțin o comandă")
         return v
+
+
+# Backward compatibility
+CreateAdHocTripRequest = AdHocTripRequest

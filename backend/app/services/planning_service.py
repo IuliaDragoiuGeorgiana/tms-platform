@@ -2495,6 +2495,83 @@ def add_order_to_trip(
     }
 
 
+def _get_route_interval_from_solver(
+    planned_date: date,
+    solver_result: dict,
+) -> tuple:
+    """
+    Calculează intervalul real al rutei din rezultatul solverului,
+    fără să depindă de TripStop-uri salvate în DB.
+
+    Returnează (start_dt, end_dt) sau (None, None) dacă nu se poate calcula.
+    """
+    start_seconds = solver_result.get("start_seconds")
+    end_seconds = solver_result.get("end_seconds")
+
+    if start_seconds is None or end_seconds is None:
+        return None, None
+
+    start_dt = datetime(
+        planned_date.year,
+        planned_date.month,
+        planned_date.day,
+        tzinfo=LOCAL_TZ,
+    ) + timedelta(seconds=start_seconds)
+
+    end_dt = datetime(
+        planned_date.year,
+        planned_date.month,
+        planned_date.day,
+        tzinfo=LOCAL_TZ,
+    ) + timedelta(seconds=end_seconds)
+
+    return start_dt, end_dt
+
+
+def _check_driver_interval_overlap(
+    db: Session,
+    driver_id: uuid.UUID,
+    company_id: uuid.UUID,
+    new_start,
+    new_end,
+    exclude_trip_id: uuid.UUID | None = None,
+) -> None:
+    """
+    Verifică dacă șoferul are alt trip care se suprapune
+    cu intervalul calculat pentru ad-hoc trip.
+
+    Exclude trip-ul cu ID-ul dat (util pentru validare trip-ului creat).
+    """
+    if not new_start or not new_end:
+        return
+
+    query = db.query(Trip).filter(
+        Trip.company_id == company_id,
+        Trip.driver_id == driver_id,
+        Trip.status.in_([
+            TripStatusEnum.PROPOSED,
+            TripStatusEnum.APPROVED,
+            TripStatusEnum.IN_PROGRESS,
+        ]),
+    )
+
+    if exclude_trip_id:
+        query = query.filter(Trip.id != exclude_trip_id)
+
+    other_trips = query.all()
+
+    for other_trip in other_trips:
+        other_start, other_end = _get_trip_time_interval(other_trip)
+
+        if not other_start or not other_end:
+            continue
+
+        if _intervals_overlap(new_start, new_end, other_start, other_end):
+            raise ValueError(
+                "Șoferul are deja un alt trip care se suprapune cu acest interval orar"
+            )
+
+
 def create_ad_hoc_trip(
     db: Session,
     session_id: uuid.UUID,
@@ -2503,6 +2580,7 @@ def create_ad_hoc_trip(
     driver_id: uuid.UUID,
     vehicle_id: uuid.UUID,
     order_ids: list[uuid.UUID],
+    dry_run: bool = False,
 ) -> dict:
     """
     Creează un trip nou ad-hoc într-o sesiune de planificare PROPOSED.
@@ -2554,7 +2632,18 @@ def create_ad_hoc_trip(
     ).first()
 
     if not driver:
-        raise ValueError("Șoferul nu a fost găsit sau nu este disponibil")
+        driver_check = db.query(Driver).filter(
+            Driver.id == driver_id,
+            Driver.company_id == company_id,
+        ).first()
+
+        if not driver_check:
+            raise ValueError(f"Șoferul cu ID {driver_id} nu a fost găsit în compania ta")
+        else:
+            raise ValueError(
+                f"Șoferul {driver_check.user.full_name if driver_check.user else 'N/A'} "
+                f"nu este disponibil. Status: {driver_check.status.value if hasattr(driver_check.status, 'value') else str(driver_check.status)}"
+            )
 
     vehicle = db.query(Vehicle).filter(
         Vehicle.id == vehicle_id,
@@ -2563,7 +2652,18 @@ def create_ad_hoc_trip(
     ).first()
 
     if not vehicle:
-        raise ValueError("Vehiculul nu a fost găsit sau nu este disponibil")
+        vehicle_check = db.query(Vehicle).filter(
+            Vehicle.id == vehicle_id,
+            Vehicle.company_id == company_id,
+        ).first()
+
+        if not vehicle_check:
+            raise ValueError(f"Vehiculul cu ID {vehicle_id} nu a fost găsit în compania ta")
+        else:
+            raise ValueError(
+                f"Vehiculul {vehicle_check.plate} nu este disponibil. "
+                f"Status: {vehicle_check.status.value if hasattr(vehicle_check.status, 'value') else str(vehicle_check.status)}"
+            )
 
     orders = db.query(Order).filter(
         Order.id.in_(unique_order_ids),
@@ -2696,8 +2796,9 @@ def create_ad_hoc_trip(
         planned_duration_min=round(total_minutes),
     )
 
-    db.add(trip)
-    db.flush()
+    if not dry_run:
+        db.add(trip)
+        db.flush()
 
     sequence = 1
     num_orders = len(ordered_orders)
@@ -2731,16 +2832,17 @@ def create_ad_hoc_trip(
                 tzinfo=LOCAL_TZ,
             ) + timedelta(seconds=arrival_seconds)
 
-        trip_stop = TripStop(
-            trip_id=trip.id,
-            order_id=order.id,
-            sequence=sequence,
-            stop_type=stop_type,
-            eta_planned=eta,
-            status=StopStatusEnum.PENDING,
-        )
+        if not dry_run:
+            trip_stop = TripStop(
+                trip_id=trip.id,
+                order_id=order.id,
+                sequence=sequence,
+                stop_type=stop_type,
+                eta_planned=eta,
+                status=StopStatusEnum.PENDING,
+            )
 
-        db.add(trip_stop)
+            db.add(trip_stop)
 
         stops_preview.append({
             "sequence": sequence,
@@ -2752,22 +2854,32 @@ def create_ad_hoc_trip(
 
         sequence += 1
 
-    db.flush()
-
-    db.expire(trip, ["stops"])
+    if not dry_run:
+        db.flush()
+        db.expire(trip, ["stops"])
 
     try:
+        trip.driver = driver
+        trip.vehicle = vehicle
+
         _validate_reoptimized_trip(
             trip=trip,
             orders=ordered_orders,
             solver_result=solver_result,
         )
 
-        _check_driver_trip_overlap(
+        route_start, route_end = _get_route_interval_from_solver(
+            planned_date=planned_date,
+            solver_result=solver_result,
+        )
+
+        _check_driver_interval_overlap(
             db=db,
-            trip=trip,
-            new_driver_id=driver.id,
+            driver_id=driver.id,
             company_id=company_id,
+            new_start=route_start,
+            new_end=route_end,
+            exclude_trip_id=trip.id if not dry_run else None,
         )
 
     except ValueError as e:
@@ -2776,36 +2888,626 @@ def create_ad_hoc_trip(
             f"Motiv: {str(e)}"
         )
 
-    for order in ordered_orders:
-        order.status = OrderStatusEnum.PLANNED
-        order.assigned_delivery_date = planned_date
+    if not dry_run:
+        for order in ordered_orders:
+            order.status = OrderStatusEnum.PLANNED
+            order.assigned_delivery_date = planned_date
 
-    db.commit()
-    db.refresh(trip)
+        db.commit()
+        db.refresh(trip)
+
+    final_demands = [0]
+    for order in ordered_orders:
+        final_demands.append(int(float(order.kg)))
+    for order in ordered_orders:
+        final_demands.append(-int(float(order.kg)))
+
+    final_volume_demands = [0]
+    for order in ordered_orders:
+        final_volume_demands.append(int(float(order.m3) * 100))
+    for order in ordered_orders:
+        final_volume_demands.append(-int(float(order.m3) * 100))
+
+    peak_kg, peak_volume_scaled = calculate_peak_loads(
+        route=optimized_route,
+        kg_demands=final_demands,
+        volume_demands=final_volume_demands,
+    )
+    peak_m3 = peak_volume_scaled / 100
+
+    driver_available_minutes = _driver_available_minutes(driver)
+    driver_remaining_after = max(0, driver_available_minutes - total_minutes)
+    driver_overtime = max(0, total_minutes - driver_available_minutes)
+
+    def format_time_from_seconds(seconds: int) -> str:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        return f"{hours:02d}:{minutes:02d}"
+
+    trip_start_seconds = solver_result.get("start_seconds", 5 * 3600)
+    trip_end_seconds = solver_result.get("end_seconds", trip_start_seconds + total_minutes * 60)
+
+    # Colectează warnings
+    warnings = []
+
+    # Warning: capacitate vehicul aproape de limită
+    vehicle_capacity_kg = float(vehicle.capacity_kg)
+    vehicle_capacity_m3 = float(vehicle.capacity_m3)
+
+    if vehicle_capacity_kg > 0:
+        kg_utilization = (peak_kg / vehicle_capacity_kg) * 100
+        if kg_utilization > 85:
+            warnings.append({
+                "type": "VEHICLE_CAPACITY_WARNING",
+                "severity": "WARNING",
+                "message": f"Vehiculul este utilizat la {kg_utilization:.1f}% din capacitate kg (limită: 85%)",
+            })
+
+    if vehicle_capacity_m3 > 0:
+        m3_utilization = (peak_m3 / vehicle_capacity_m3) * 100
+        if m3_utilization > 85:
+            warnings.append({
+                "type": "VEHICLE_VOLUME_WARNING",
+                "severity": "WARNING",
+                "message": f"Vehiculul este utilizat la {m3_utilization:.1f}% din capacitate m³ (limită: 85%)",
+            })
+
+    # Warning: durata cursei aproape de limita șoferului
+    if driver_available_minutes > 0:
+        time_utilization = (total_minutes / driver_available_minutes) * 100
+        if time_utilization > 90:
+            warnings.append({
+                "type": "DRIVER_TIME_WARNING",
+                "severity": "WARNING",
+                "message": f"Cursa utilizează {time_utilization:.1f}% din timpul disponibil al șoferului",
+            })
+
+    # Warning: marfă cu risc operațional
+    for order in ordered_orders:
+        type_marfa = order.type_marfa.value if hasattr(order.type_marfa, "value") else str(order.type_marfa)
+
+        if type_marfa in ["FRAGIL", "ADR", "PERISABIL"]:
+            warnings.append({
+                "type": "CARGO_RISK_WARNING",
+                "severity": "WARNING",
+                "order_ref": order.order_ref,
+                "message": f"Comanda {order.order_ref} conține marfă {type_marfa} cu risc operațional",
+            })
+
+    # Warning: ETA aproape de finalul ferestrei orare
+    num_orders = len(ordered_orders)
+    for i in range(num_orders):
+        order = ordered_orders[i]
+        delivery_node_idx = i + 1 + num_orders
+
+        if (
+            order.delivery_time_window_end
+            and delivery_node_idx in solver_arrival_times
+        ):
+            arrival_sec = solver_arrival_times[delivery_node_idx]
+            window_end_sec = time_to_seconds(order.delivery_time_window_end)
+
+            if arrival_sec < window_end_sec:
+                minutes_until_window_end = (window_end_sec - arrival_sec) / 60
+
+                if minutes_until_window_end < 15:
+                    eta_h = arrival_sec // 3600
+                    eta_m = (arrival_sec % 3600) // 60
+                    win_end_str = order.delivery_time_window_end.strftime("%H:%M")
+
+                    warnings.append({
+                        "type": "TIME_WINDOW_WARNING",
+                        "severity": "WARNING",
+                        "order_ref": order.order_ref,
+                        "message": (
+                            f"Comanda {order.order_ref}: ETA {int(eta_h):02d}:{int(eta_m):02d} "
+                            f"este la doar {int(minutes_until_window_end)} min de finalul ferestrei orare ({win_end_str})"
+                        ),
+                    })
 
     return {
-        "trip_id": str(trip.id),
+        "trip_id": str(trip.id) if not dry_run else None,
         "planning_session_id": str(session.id),
         "planned_date": str(trip.planned_date),
         "status": trip.status.value,
         "driver_id": str(driver.id),
+        "driver_name": driver.user.full_name if driver.user else None,
         "vehicle_id": str(vehicle.id),
         "vehicle_plate": vehicle.plate,
-        "planned_km": float(trip.planned_km),
-        "planned_duration_min": trip.planned_duration_min,
+        "planned_km": round(float(trip.planned_km), 1),
+        "planned_duration_min": int(trip.planned_duration_min),
         "total_orders": len(ordered_orders),
         "total_stops": len(stops_preview),
+        "total_kg": round(sum(float(o.kg) for o in ordered_orders), 2),
+        "total_m3": round(sum(float(o.m3) for o in ordered_orders), 2),
+        "peak_kg": peak_kg,
+        "peak_m3": round(peak_m3, 2),
+        "driver_available_minutes_before": driver_available_minutes,
+        "driver_remaining_minutes_after": driver_remaining_after,
+        "driver_overtime_minutes": driver_overtime,
+        "trip_start_time": format_time_from_seconds(trip_start_seconds),
+        "trip_end_time": format_time_from_seconds(trip_end_seconds),
         "orders": [
             {
                 "order_id": str(order.id),
                 "order_ref": order.order_ref,
-                "status": order.status.value,
-                "assigned_delivery_date": str(order.assigned_delivery_date),
+                "status": order.status.value if not dry_run else "PENDING",
+                "kg": float(order.kg),
+                "m3": float(order.m3),
             }
             for order in ordered_orders
         ],
         "stops": stops_preview,
-        "message": "Trip-ul ad-hoc a fost creat cu succes ca PROPOSED.",
+        "warnings": warnings,
+        "warnings_count": len(warnings),
+        "message": "Trip-ul ad-hoc a fost creat cu succes ca PROPOSED." if not dry_run else "Previzualizare trip-ul ad-hoc.",
+    }
+
+
+def create_adhoc_planning_session(
+    db: Session,
+    company_id: uuid.UUID,
+    created_by_id: uuid.UUID,
+    planned_date: date,
+    driver_id: uuid.UUID,
+    vehicle_id: uuid.UUID,
+    order_ids: list[uuid.UUID],
+    dry_run: bool = False,
+) -> dict:
+    """
+    Creează o nouă sesiune de planificare ad-hoc pentru o dată specifică.
+
+    Dispecerul alege manual:
+    - data trip-ului;
+    - șoferul;
+    - vehiculul;
+    - una sau mai multe comenzi PENDING.
+
+    Sistemul:
+    - validează toate restricțiile (șofer, vehicul, capacitate, time windows, deadline);
+    - geocodează comenzile dacă necesare;
+    - calculează ruta optimă cu OR-Tools;
+    - creează o nouă PlanningSession (PROPOSED) cu un Trip (PROPOSED) în ea;
+    - marchează comenzile ca PLANNED (dacă dry_run=False).
+
+    dry_run=True → validare și preview fără a salva în DB.
+    dry_run=False → creează și salvează în DB.
+    """
+    if planned_date < date.today():
+        raise ValueError("Nu poți planifica pentru o dată din trecut")
+
+    if not order_ids:
+        raise ValueError("Trebuie selectată cel puțin o comandă")
+
+    unique_order_ids = list(dict.fromkeys(order_ids))
+    if len(unique_order_ids) != len(order_ids):
+        raise ValueError("Lista de comenzi conține duplicate")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise ValueError("Compania nu a fost găsită")
+
+    driver = db.query(Driver).filter(
+        Driver.id == driver_id,
+        Driver.company_id == company_id,
+        Driver.status == DriverStatusEnum.AVAILABLE,
+    ).first()
+
+    if not driver:
+        driver_check = db.query(Driver).filter(
+            Driver.id == driver_id,
+            Driver.company_id == company_id,
+        ).first()
+
+        if not driver_check:
+            raise ValueError(f"Șoferul cu ID {driver_id} nu a fost găsit în compania ta")
+        else:
+            raise ValueError(
+                f"Șoferul {driver_check.user.full_name if driver_check.user else 'N/A'} "
+                f"nu este disponibil. Status: {driver_check.status.value if hasattr(driver_check.status, 'value') else str(driver_check.status)}"
+            )
+
+    vehicle = db.query(Vehicle).filter(
+        Vehicle.id == vehicle_id,
+        Vehicle.company_id == company_id,
+        Vehicle.status == VehicleStatusEnum.DISPONIBIL,
+    ).first()
+
+    if not vehicle:
+        vehicle_check = db.query(Vehicle).filter(
+            Vehicle.id == vehicle_id,
+            Vehicle.company_id == company_id,
+        ).first()
+
+        if not vehicle_check:
+            raise ValueError(f"Vehiculul cu ID {vehicle_id} nu a fost găsit în compania ta")
+        else:
+            raise ValueError(
+                f"Vehiculul {vehicle_check.plate} nu este disponibil. "
+                f"Status: {vehicle_check.status.value if hasattr(vehicle_check.status, 'value') else str(vehicle_check.status)}"
+            )
+
+    orders = db.query(Order).filter(
+        Order.id.in_(unique_order_ids),
+        Order.company_id == company_id,
+    ).all()
+
+    orders_by_id = {order.id: order for order in orders}
+
+    if len(orders) != len(unique_order_ids):
+        raise ValueError("Una sau mai multe comenzi nu au fost găsite")
+
+    ordered_orders = []
+
+    for order_id in unique_order_ids:
+        order = orders_by_id.get(order_id)
+
+        if not order:
+            raise ValueError("Una sau mai multe comenzi nu au fost găsite")
+
+        if order.status != OrderStatusEnum.PENDING:
+            raise ValueError(
+                f"Comanda {order.order_ref} nu poate fi planificată deoarece nu este PENDING. "
+                f"Status actual: {order.status.value}"
+            )
+
+        if order.is_problematic:
+            raise ValueError(
+                f"Comanda {order.order_ref} este marcată ca problematică și nu poate fi planificată"
+            )
+
+        earliest_day, latest_day = _get_order_planning_window(order)
+
+        if planned_date < earliest_day or planned_date > latest_day:
+            raise ValueError(
+                f"Comanda {order.order_ref} nu este eligibilă pentru data {planned_date}. "
+                f"Interval eligibil: {earliest_day} - {latest_day}"
+            )
+
+        if order.pickup_lat is None or order.pickup_lon is None:
+            pickup_address = _build_order_address_for_geocoding(order, "pickup")
+            result = geocode_with_components(pickup_address)
+
+            if not result:
+                raise ValueError(
+                    f"Comanda {order.order_ref} nu poate fi planificată deoarece "
+                    "adresa de pickup nu a putut fi geocodată"
+                )
+
+            order.pickup_lat = result["lat"]
+            order.pickup_lon = result["lon"]
+            order.pickup_county = result.get("county") or order.pickup_county
+            order.pickup_city = result.get("city") or order.pickup_city
+            order.pickup_street = result.get("street") or order.pickup_street
+            order.pickup_number = result.get("number") or order.pickup_number
+
+        if order.delivery_lat is None or order.delivery_lon is None:
+            delivery_address = _build_order_address_for_geocoding(order, "delivery")
+            result = geocode_with_components(delivery_address)
+
+            if not result:
+                raise ValueError(
+                    f"Comanda {order.order_ref} nu poate fi planificată deoarece "
+                    "adresa de livrare nu a putut fi geocodată"
+                )
+
+            order.delivery_lat = result["lat"]
+            order.delivery_lon = result["lon"]
+            order.delivery_county = result.get("county") or order.delivery_county
+            order.delivery_city = result.get("city") or order.delivery_city
+            order.delivery_street = result.get("street") or order.delivery_street
+            order.delivery_number = result.get("number") or order.delivery_number
+
+        if float(order.kg) > float(vehicle.capacity_kg):
+            raise ValueError(
+                f"Comanda {order.order_ref} nu poate fi planificată: greutatea "
+                f"({float(order.kg):.2f} kg) depășește capacitatea vehiculului "
+                f"({float(vehicle.capacity_kg):.2f} kg)"
+            )
+
+        if float(order.m3) > float(vehicle.capacity_m3):
+            raise ValueError(
+                f"Comanda {order.order_ref} nu poate fi planificată: volumul "
+                f"({float(order.m3):.2f} m³) depășește capacitatea vehiculului "
+                f"({float(vehicle.capacity_m3):.2f} m³)"
+            )
+
+        ensure_order_service_times(db, order)
+        ordered_orders.append(order)
+
+    depot_lat, depot_lon = _ensure_company_depot_coords(db, company)
+
+    depot_start_seconds = time_to_seconds(driver.shift_start) if driver.shift_start else 5 * 3600
+
+    try:
+        route_result = _solve_orders_for_vehicle(
+            db=db,
+            orders=ordered_orders,
+            vehicle=vehicle,
+            depot_lat=depot_lat,
+            depot_lon=depot_lon,
+            depot_start_seconds=depot_start_seconds,
+        )
+
+    except ValueError as e:
+        raise ValueError(
+            "Trip-ul ad-hoc nu poate fi creat. "
+            f"Motiv: {str(e)}"
+        )
+
+    solver_result = route_result["solver_result"]
+    optimized_route = solver_result["route"]
+    solver_arrival_times = solver_result.get("arrival_times", {})
+    total_km = route_result["total_km"]
+    total_minutes = route_result["total_minutes"]
+
+    planning_session = None
+    trip = None
+
+    if not dry_run:
+        planning_session = PlanningSession(
+            company_id=company_id,
+            created_by=created_by_id,
+            date_range_start=planned_date,
+            date_range_end=planned_date,
+            strategy=PlanningStrategyEnum.AD_HOC,
+            status=PlanningStatusEnum.PROPOSED,
+            total_orders=len(ordered_orders),
+        )
+        db.add(planning_session)
+        db.flush()
+
+    trip = Trip(
+        company_id=company_id,
+        driver_id=driver.id,
+        vehicle_id=vehicle.id,
+        planning_session_id=planning_session.id if not dry_run else None,
+        planned_date=planned_date,
+        status=TripStatusEnum.PROPOSED,
+        planned_km=round(total_km, 1),
+        planned_duration_min=round(total_minutes),
+    )
+
+    if not dry_run:
+        db.add(trip)
+        db.flush()
+
+    sequence = 1
+    num_orders = len(ordered_orders)
+    stops_preview = []
+
+    for route_idx in optimized_route:
+        if route_idx == 0:
+            continue
+
+        if route_idx <= num_orders:
+            order_idx = route_idx - 1
+            stop_type = StopTypeEnum.PICKUP
+        else:
+            order_idx = route_idx - 1 - num_orders
+            stop_type = StopTypeEnum.DELIVERY
+
+        if order_idx >= num_orders:
+            continue
+
+        order = ordered_orders[order_idx]
+
+        eta = None
+
+        if solver_arrival_times and route_idx in solver_arrival_times:
+            arrival_seconds = solver_arrival_times[route_idx]
+
+            eta = datetime(
+                planned_date.year,
+                planned_date.month,
+                planned_date.day,
+                tzinfo=LOCAL_TZ,
+            ) + timedelta(seconds=arrival_seconds)
+
+        if not dry_run:
+            trip_stop = TripStop(
+                trip_id=trip.id,
+                order_id=order.id,
+                sequence=sequence,
+                stop_type=stop_type,
+                eta_planned=eta,
+                status=StopStatusEnum.PENDING,
+            )
+
+            db.add(trip_stop)
+
+        stops_preview.append({
+            "sequence": sequence,
+            "order_id": str(order.id),
+            "order_ref": order.order_ref,
+            "stop_type": stop_type.value,
+            "eta_planned": eta.isoformat() if eta else None,
+        })
+
+        sequence += 1
+
+    if not dry_run:
+        db.flush()
+        db.expire(trip, ["stops"])
+
+    try:
+        trip.driver = driver
+        trip.vehicle = vehicle
+
+        _validate_reoptimized_trip(
+            trip=trip,
+            orders=ordered_orders,
+            solver_result=solver_result,
+        )
+
+        route_start, route_end = _get_route_interval_from_solver(
+            planned_date=planned_date,
+            solver_result=solver_result,
+        )
+
+        _check_driver_interval_overlap(
+            db=db,
+            driver_id=driver.id,
+            company_id=company_id,
+            new_start=route_start,
+            new_end=route_end,
+            exclude_trip_id=trip.id if not dry_run else None,
+        )
+
+    except ValueError as e:
+        raise ValueError(
+            "Trip-ul ad-hoc nu poate fi creat. "
+            f"Motiv: {str(e)}"
+        )
+
+    if not dry_run:
+        for order in ordered_orders:
+            order.status = OrderStatusEnum.PLANNED
+            order.assigned_delivery_date = planned_date
+
+        db.commit()
+        db.refresh(trip)
+
+    final_demands = [0]
+    for order in ordered_orders:
+        final_demands.append(int(float(order.kg)))
+    for order in ordered_orders:
+        final_demands.append(-int(float(order.kg)))
+
+    final_volume_demands = [0]
+    for order in ordered_orders:
+        final_volume_demands.append(int(float(order.m3) * 100))
+    for order in ordered_orders:
+        final_volume_demands.append(-int(float(order.m3) * 100))
+
+    peak_kg, peak_volume_scaled = calculate_peak_loads(
+        route=optimized_route,
+        kg_demands=final_demands,
+        volume_demands=final_volume_demands,
+    )
+    peak_m3 = peak_volume_scaled / 100
+
+    driver_available_minutes = _driver_available_minutes(driver)
+    driver_remaining_after = max(0, driver_available_minutes - total_minutes)
+    driver_overtime = max(0, total_minutes - driver_available_minutes)
+
+    def format_time_from_seconds(seconds: int) -> str:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        return f"{hours:02d}:{minutes:02d}"
+
+    trip_start_seconds = solver_result.get("start_seconds", 5 * 3600)
+    trip_end_seconds = solver_result.get("end_seconds", trip_start_seconds + total_minutes * 60)
+
+    warnings = []
+
+    vehicle_capacity_kg = float(vehicle.capacity_kg)
+    vehicle_capacity_m3 = float(vehicle.capacity_m3)
+
+    if vehicle_capacity_kg > 0:
+        kg_utilization = (peak_kg / vehicle_capacity_kg) * 100
+        if kg_utilization > 85:
+            warnings.append({
+                "type": "VEHICLE_CAPACITY_WARNING",
+                "severity": "WARNING",
+                "message": f"Vehiculul este utilizat la {kg_utilization:.1f}% din capacitate kg (limită: 85%)",
+            })
+
+    if vehicle_capacity_m3 > 0:
+        m3_utilization = (peak_m3 / vehicle_capacity_m3) * 100
+        if m3_utilization > 85:
+            warnings.append({
+                "type": "VEHICLE_VOLUME_WARNING",
+                "severity": "WARNING",
+                "message": f"Vehiculul este utilizat la {m3_utilization:.1f}% din capacitate m³ (limită: 85%)",
+            })
+
+    if driver_available_minutes > 0:
+        time_utilization = (total_minutes / driver_available_minutes) * 100
+        if time_utilization > 90:
+            warnings.append({
+                "type": "DRIVER_TIME_WARNING",
+                "severity": "WARNING",
+                "message": f"Cursa utilizează {time_utilization:.1f}% din timpul disponibil al șoferului",
+            })
+
+    for order in ordered_orders:
+        type_marfa = order.type_marfa.value if hasattr(order.type_marfa, "value") else str(order.type_marfa)
+
+        if type_marfa in ["FRAGIL", "ADR", "PERISABIL"]:
+            warnings.append({
+                "type": "CARGO_RISK_WARNING",
+                "severity": "WARNING",
+                "order_ref": order.order_ref,
+                "message": f"Comanda {order.order_ref} conține marfă {type_marfa} cu risc operațional",
+            })
+
+    num_orders = len(ordered_orders)
+    for i in range(num_orders):
+        order = ordered_orders[i]
+        delivery_node_idx = i + 1 + num_orders
+
+        if (
+            order.delivery_time_window_end
+            and delivery_node_idx in solver_arrival_times
+        ):
+            arrival_sec = solver_arrival_times[delivery_node_idx]
+            window_end_sec = time_to_seconds(order.delivery_time_window_end)
+
+            if arrival_sec < window_end_sec:
+                minutes_until_window_end = (window_end_sec - arrival_sec) / 60
+
+                if minutes_until_window_end < 15:
+                    eta_h = arrival_sec // 3600
+                    eta_m = (arrival_sec % 3600) // 60
+                    win_end_str = order.delivery_time_window_end.strftime("%H:%M")
+
+                    warnings.append({
+                        "type": "TIME_WINDOW_WARNING",
+                        "severity": "WARNING",
+                        "order_ref": order.order_ref,
+                        "message": (
+                            f"Comanda {order.order_ref}: ETA {int(eta_h):02d}:{int(eta_m):02d} "
+                            f"este la doar {int(minutes_until_window_end)} min de finalul ferestrei orare ({win_end_str})"
+                        ),
+                    })
+
+    return {
+        "planning_session_id": str(planning_session.id) if not dry_run else None,
+        "trip_id": str(trip.id) if not dry_run else None,
+        "planned_date": str(planned_date),
+        "status": "PROPOSED",
+        "driver_id": str(driver.id),
+        "driver_name": driver.user.full_name if driver.user else None,
+        "vehicle_id": str(vehicle.id),
+        "vehicle_plate": vehicle.plate,
+        "planned_km": round(float(trip.planned_km), 1),
+        "planned_duration_min": int(trip.planned_duration_min),
+        "total_orders": len(ordered_orders),
+        "total_stops": len(stops_preview),
+        "total_kg": round(sum(float(o.kg) for o in ordered_orders), 2),
+        "total_m3": round(sum(float(o.m3) for o in ordered_orders), 2),
+        "peak_kg": peak_kg,
+        "peak_m3": round(peak_m3, 2),
+        "driver_available_minutes_before": driver_available_minutes,
+        "driver_remaining_minutes_after": driver_remaining_after,
+        "driver_overtime_minutes": driver_overtime,
+        "trip_start_time": format_time_from_seconds(trip_start_seconds),
+        "trip_end_time": format_time_from_seconds(trip_end_seconds),
+        "orders": [
+            {
+                "order_id": str(order.id),
+                "order_ref": order.order_ref,
+                "status": order.status.value if not dry_run else "PENDING",
+                "kg": float(order.kg),
+                "m3": float(order.m3),
+            }
+            for order in ordered_orders
+        ],
+        "stops": stops_preview,
+        "warnings": warnings,
+        "warnings_count": len(warnings),
+        "message": "Sesiune ad-hoc creată cu succes ca PROPOSED." if not dry_run else "Previzualizare sesiune ad-hoc.",
     }
 
 

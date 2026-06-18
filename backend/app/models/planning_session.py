@@ -9,6 +9,7 @@ class PlanningStrategyEnum(str, enum.Enum):
     GREEDY_DEADLINE = "GREEDY_DEADLINE"
     MAX_DENSITY = "MAX_DENSITY"
     HYBRID = "HYBRID"
+    AD_HOC = "AD_HOC"
 
 
 class PlanningStatusEnum(str, enum.Enum):
