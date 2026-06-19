@@ -22,7 +22,8 @@ export class Navbar implements OnDestroy {
   languages: { code: Language; icon: string; label: string }[];
   currentLanguage: Language;
   currentUser: UserResponse | null = null;
-  isLanguageMenuOpen = false;
+  isOptionsMenuOpen = false;
+  isLanguageSubmenuOpen = false;
   private languageSubscription: Subscription;
   private roleSubscription: Subscription;
   private loggedInSubscription: Subscription;
@@ -63,23 +64,35 @@ export class Navbar implements OnDestroy {
 
   setLanguage(language: string): void {
     this.i18nService.setLanguage(language as Language);
-    this.isLanguageMenuOpen = false;
+    this.isOptionsMenuOpen = false;
+    this.isLanguageSubmenuOpen = false;
     this.changeDetectorRef.detectChanges();
   }
 
-  toggleLanguageMenu(): void {
-    this.isLanguageMenuOpen = !this.isLanguageMenuOpen;
+  toggleOptionsMenu(): void {
+    this.isOptionsMenuOpen = !this.isOptionsMenuOpen;
+    if (!this.isOptionsMenuOpen) {
+      this.isLanguageSubmenuOpen = false;
+    }
     this.changeDetectorRef.detectChanges();
+  }
+
+  toggleLanguageSubmenu(): void {
+    this.isLanguageSubmenuOpen = !this.isLanguageSubmenuOpen;
+    this.changeDetectorRef.detectChanges();
+  }
+
+  openChangePassword(): void {
+    this.isOptionsMenuOpen = false;
+    this.isLanguageSubmenuOpen = false;
+    this.changeDetectorRef.detectChanges();
+    this.router.navigate(['/change-password']);
   }
 
   get selectedLanguage() {
     return (
       this.languages.find((language) => language.code === this.currentLanguage) ?? this.languages[0]
     );
-  }
-
-  get availableLanguages() {
-    return this.languages.filter((language) => language.code !== this.currentLanguage);
   }
 
   logout(): void {
@@ -90,8 +103,9 @@ export class Navbar implements OnDestroy {
   }
 
   @HostListener('document:click')
-  closeLanguageMenu(): void {
-    this.isLanguageMenuOpen = false;
+  closeOptionsMenu(): void {
+    this.isOptionsMenuOpen = false;
+    this.isLanguageSubmenuOpen = false;
     this.changeDetectorRef.detectChanges();
   }
 

@@ -72,25 +72,54 @@
     </div>
     }
 
-    <div class="language-menu" (click)="$event.stopPropagation()">
+    <div class="options-menu" (click)="$event.stopPropagation()">
       <button
         type="button"
-        class="language-menu__trigger"
-        [attr.aria-label]="'nav.language' | translate"
-        [attr.aria-expanded]="isLanguageMenuOpen"
-        (click)="toggleLanguageMenu()"
+        class="options-menu__trigger"
+        [attr.aria-label]="'nav.options' | translate"
+        [attr.aria-expanded]="isOptionsMenuOpen"
+        (click)="toggleOptionsMenu()"
       >
-        <span class="language-icon">{{ selectedLanguage.icon }}</span>
+        <span class="nav-icon" aria-hidden="true">⚙</span>
       </button>
 
-      @if (isLanguageMenuOpen) {
-      <div class="language-menu__dropdown">
-        @for (language of availableLanguages; track language.code) {
-        <button type="button" class="language-menu__option" (click)="setLanguage(language.code)">
-          <span class="language-icon">{{ language.icon }}</span>
-          <span>{{ language.label }}</span>
-        </button>
-        }
+      @if (isOptionsMenuOpen) {
+      <div class="options-menu__dropdown">
+        <div class="options-menu__section">
+          <button
+            type="button"
+            class="options-menu__option options-menu__option--parent"
+            [attr.aria-expanded]="isLanguageSubmenuOpen"
+            (click)="toggleLanguageSubmenu()"
+          >
+            <span class="language-icon">{{ selectedLanguage.icon }}</span>
+            <span>{{ 'nav.language' | translate }}</span>
+            <span class="options-menu__chevron" aria-hidden="true">›</span>
+          </button>
+
+          @if (isLanguageSubmenuOpen) {
+          <div class="options-menu__submenu">
+            @for (language of languages; track language.code) {
+            <button
+              type="button"
+              class="options-menu__option"
+              [class.active]="language.code === currentLanguage"
+              (click)="setLanguage(language.code)"
+            >
+              <span class="language-icon">{{ language.icon }}</span>
+              <span>{{ language.label }}</span>
+            </button>
+            }
+          </div>
+          }
+
+          @if (isLoggedIn$ | async) {
+          <button type="button" class="options-menu__option" (click)="openChangePassword()">
+            <span class="nav-icon" aria-hidden="true">••</span>
+            <span>{{ 'change_password.title' | translate }}</span>
+          </button>
+          }
+        </div>
       </div>
       }
     </div>
