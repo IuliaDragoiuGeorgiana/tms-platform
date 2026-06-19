@@ -9,6 +9,7 @@ import { DriverService } from '../../core/services/driver';
 import {
   EligibleOrderSummary,
   EligibleOrdersResponse,
+  AdHocTripPreviewResponse,
   PlanningService,
   StrategyComparisonResponse,
   StrategyComparisonVariant,
@@ -41,6 +42,9 @@ export class Planning implements OnInit, OnDestroy {
   isGeneratingPlan = false;
   isLoadingTripStops = false;
   isSavingTripEdits = false;
+  isManualTripWindowOpen = false;
+  isCreatingManualTrip = false;
+  isPreviewingManualTrip = false;
   removingTripOrderId: string | null = null;
   pendingRemoveTripOrderId: string | null = null;
   isAddTripOrderWindowOpen = false;
@@ -52,6 +56,9 @@ export class Planning implements OnInit, OnDestroy {
   approveTripSuccess = '';
   editTripError = '';
   editTripSuccess = '';
+  manualTripError = '';
+  manualTripSuccess = '';
+  manualTripPreviewSuccess = '';
   compareStrategiesError = '';
   planGenerationSuccess = '';
   eligibleOrdersResponse: EligibleOrdersResponse | null = null;
@@ -68,6 +75,12 @@ export class Planning implements OnInit, OnDestroy {
   originalEditTripVehicleId = '';
   isEditTripDriverDirty = false;
   isEditTripVehicleDirty = false;
+  manualTripDate = '';
+  manualTripDriverId = '';
+  manualTripVehicleId = '';
+  manualTripOrderIds = new Set<string>();
+  manualTripPreview: AdHocTripPreviewResponse | null = null;
+  manualTripPreviewSignature = '';
   strategyComparison: StrategyComparisonResponse | null = null;
   readonly today = this.toDateInputValue(new Date());
   dateStart = this.today;
@@ -393,6 +406,215 @@ export class Planning implements OnInit, OnDestroy {
     this.isAddTripOrderWindowOpen = false;
     this.addingTripOrderId = null;
     this.changeDetectorRef.detectChanges();
+  }
+
+  openManualTripWindow(): void {
+    this.isManualTripWindowOpen = true;
+    this.isCreatingManualTrip = false;
+    this.isPreviewingManualTrip = false;
+    this.manualTripError = '';
+    this.manualTripSuccess = '';
+    this.manualTripPreviewSuccess = '';
+    this.manualTripDate = this.dateStart || this.today;
+    this.manualTripDriverId = this.driverOptions[0]?.value ?? '';
+    this.manualTripVehicleId = this.vehicleOptions[0]?.value ?? '';
+    this.manualTripOrderIds = new Set<string>();
+    this.manualTripPreview = null;
+    this.manualTripPreviewSignature = '';
+    this.lockBackgroundScroll();
+    this.loadEligibleOrders();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  closeManualTripWindow(): void {
+    this.isManualTripWindowOpen = false;
+    this.isCreatingManualTrip = false;
+    this.isPreviewingManualTrip = false;
+    this.manualTripError = '';
+    this.manualTripPreviewSuccess = '';
+    this.manualTripDate = this.today;
+    this.manualTripDriverId = '';
+    this.manualTripVehicleId = '';
+    this.manualTripOrderIds = new Set<string>();
+    this.manualTripPreview = null;
+    this.manualTripPreviewSignature = '';
+    this.unlockBackgroundScroll();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  updateManualTripDate(value: string): void {
+    this.manualTripDate = value;
+    this.manualTripError = '';
+    this.clearManualTripPreview();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  updateManualTripDriver(value: string): void {
+    this.manualTripDriverId = value;
+    this.manualTripError = '';
+    this.clearManualTripPreview();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  updateManualTripVehicle(value: string): void {
+    this.manualTripVehicleId = value;
+    this.manualTripError = '';
+    this.clearManualTripPreview();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  toggleManualTripOrder(orderId: string): void {
+    const nextOrderIds = new Set(this.manualTripOrderIds);
+
+    if (nextOrderIds.has(orderId)) {
+      nextOrderIds.delete(orderId);
+    } else {
+      nextOrderIds.add(orderId);
+    }
+
+    this.manualTripOrderIds = nextOrderIds;
+    this.manualTripError = '';
+    this.clearManualTripPreview();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  isManualTripOrderSelected(orderId: string): boolean {
+    return this.manualTripOrderIds.has(orderId);
+  }
+
+  getManualTripOrders(): EligibleOrderSummary[] {
+    return this.planningQueue.filter((order) => order.status === 'PENDING');
+  }
+
+  canCreateManualTrip(): boolean {
+    return Boolean(
+      this.manualTripDate &&
+      this.manualTripDriverId &&
+      this.manualTripVehicleId &&
+      this.manualTripOrderIds.size > 0 &&
+      this.manualTripPreview &&
+      this.manualTripPreviewSignature === this.getManualTripSignature() &&
+      !this.isCreatingManualTrip,
+    );
+  }
+
+  canPreviewManualTrip(): boolean {
+    return Boolean(
+      this.manualTripDate &&
+      this.manualTripDriverId &&
+      this.manualTripVehicleId &&
+      this.manualTripOrderIds.size > 0 &&
+      !this.isPreviewingManualTrip &&
+      !this.isCreatingManualTrip,
+    );
+  }
+
+  previewManualTrip(): void {
+    this.manualTripError = '';
+    this.manualTripPreviewSuccess = '';
+
+    const payload = this.getManualTripPayload();
+    if (!payload) {
+      this.changeDetectorRef.detectChanges();
+      return;
+    }
+
+    this.isPreviewingManualTrip = true;
+    this.manualTripPreview = null;
+    this.manualTripPreviewSignature = '';
+    this.changeDetectorRef.detectChanges();
+
+    this.planningService.previewAdHocTrip(payload).subscribe({
+      next: (preview) => {
+        this.isPreviewingManualTrip = false;
+        this.manualTripPreview = preview;
+        this.manualTripPreviewSignature = this.getManualTripSignature();
+        this.manualTripPreviewSuccess = 'planning.manual_trip_preview_success';
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.isPreviewingManualTrip = false;
+        this.manualTripError = error.error?.detail ?? 'common.error_generic';
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
+  createManualTrip(): void {
+    this.manualTripError = '';
+    this.manualTripSuccess = '';
+
+    const payload = this.getManualTripPayload();
+    if (!payload) {
+      this.changeDetectorRef.detectChanges();
+      return;
+    }
+
+    if (!this.manualTripPreview || this.manualTripPreviewSignature !== this.getManualTripSignature()) {
+      this.manualTripError = 'planning.manual_trip_preview_required';
+      this.changeDetectorRef.detectChanges();
+      return;
+    }
+
+    this.isCreatingManualTrip = true;
+    this.changeDetectorRef.detectChanges();
+
+    this.planningService
+      .createAdHocTrip(payload)
+      .subscribe({
+        next: () => {
+          this.isCreatingManualTrip = false;
+          this.manualTripSuccess = 'planning.manual_trip_success';
+          this.isManualTripWindowOpen = false;
+          this.manualTripOrderIds = new Set<string>();
+          this.manualTripPreview = null;
+          this.manualTripPreviewSignature = '';
+          this.manualTripPreviewSuccess = '';
+          this.unlockBackgroundScroll();
+          this.loadEligibleOrders();
+          this.loadProposedTrips();
+          this.changeDetectorRef.detectChanges();
+        },
+        error: (error: HttpErrorResponse) => {
+          this.isCreatingManualTrip = false;
+          this.manualTripError = error.error?.detail ?? 'common.error_generic';
+          this.changeDetectorRef.detectChanges();
+        },
+      });
+  }
+
+  private getManualTripPayload() {
+    if (!this.manualTripDate || !this.manualTripDriverId || !this.manualTripVehicleId) {
+      this.manualTripError = 'planning.manual_trip_required';
+      return null;
+    }
+
+    if (!this.manualTripOrderIds.size) {
+      this.manualTripError = 'planning.manual_trip_orders_required';
+      return null;
+    }
+
+    return {
+      planned_date: this.manualTripDate,
+      driver_id: this.manualTripDriverId,
+      vehicle_id: this.manualTripVehicleId,
+      order_ids: [...this.manualTripOrderIds],
+    };
+  }
+
+  private getManualTripSignature(): string {
+    return JSON.stringify({
+      planned_date: this.manualTripDate,
+      driver_id: this.manualTripDriverId,
+      vehicle_id: this.manualTripVehicleId,
+      order_ids: [...this.manualTripOrderIds].sort(),
+    });
+  }
+
+  private clearManualTripPreview(): void {
+    this.manualTripPreview = null;
+    this.manualTripPreviewSignature = '';
+    this.manualTripPreviewSuccess = '';
   }
 
   addOrderToTrip(order: EligibleOrderSummary): void {

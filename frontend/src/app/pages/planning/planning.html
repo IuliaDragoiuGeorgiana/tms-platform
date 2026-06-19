@@ -110,11 +110,23 @@
           <h2>{{ 'planning.trips_title' | translate }}</h2>
           <p>{{ 'planning.trips_description' | translate }}</p>
         </div>
-        <span>{{ proposedTrips.length }}</span>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span>{{ proposedTrips.length }}</span>
+          <button
+            type="button"
+            style="border: 1px solid var(--color-primary); border-radius: 8px; padding: 9px 11px; background: var(--color-primary); color: white; cursor: pointer; font-weight: 900; white-space: nowrap;"
+            (click)="openManualTripWindow()"
+          >
+            {{ 'planning.manual_trip_button' | translate }}
+          </button>
+        </div>
       </div>
 
       @if (proposedTripsError) {
       <div class="alert alert-error">{{ proposedTripsError | translate }}</div>
+      }
+      @if (manualTripSuccess) {
+      <div class="alert" style="background: rgba(22, 163, 74, 0.1); color: var(--color-success);">{{ manualTripSuccess | translate }}</div>
       }
       @if (approveTripError) {
       <div class="alert alert-error">{{ approveTripError | translate }}</div>
@@ -172,6 +184,232 @@
       }
     </aside>
   </div>
+
+  @if (isManualTripWindowOpen) {
+  <div
+    class="modal-backdrop"
+    style="position: fixed; inset: 0; z-index: 1000; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(6px);"
+    (click)="closeManualTripWindow()"
+  ></div>
+
+  <section
+    class="strategy-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'planning.manual_trip_title' | translate"
+    style="position: fixed; inset: 6vh 16vw auto; z-index: 1001; max-height: 88vh; overflow: auto; padding: 22px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="panel-header">
+      <div>
+        <h2>{{ 'planning.manual_trip_title' | translate }}</h2>
+        <p>{{ 'planning.manual_trip_description' | translate }}</p>
+      </div>
+      <button type="button" class="planning-action-primary" style="border: 1px solid var(--color-border); border-radius: 8px; padding: 10px 12px; cursor: pointer;" (click)="closeManualTripWindow()">
+        {{ 'orders.close' | translate }}
+      </button>
+    </div>
+
+    @if (manualTripError) {
+    <div class="alert alert-error">{{ manualTripError | translate }}</div>
+    }
+    @if (manualTripPreviewSuccess) {
+    <div class="alert" style="background: rgba(22, 163, 74, 0.1); color: var(--color-success);">{{ manualTripPreviewSuccess | translate }}</div>
+    }
+
+    <div style="display: grid; gap: 16px;">
+      <section style="display: grid; gap: 12px; padding: 14px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background);">
+        <strong>{{ 'planning.manual_trip_details' | translate }}</strong>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+          <label style="display: grid; gap: 6px; color: var(--color-text-muted); font-size: 13px; font-weight: 800;">
+            {{ 'planning.trip_date' | translate }}
+            <input
+              type="date"
+              style="min-height: 40px; border: 1px solid var(--color-border); border-radius: 8px; padding: 0 10px; background: var(--color-surface); color: var(--color-text);"
+              [min]="today"
+              [value]="manualTripDate"
+              (input)="updateManualTripDate($any($event.target).value)"
+            />
+          </label>
+
+          <label style="display: grid; gap: 6px; color: var(--color-text-muted); font-size: 13px; font-weight: 800;">
+            {{ 'planning.driver' | translate }}
+            <select
+              style="min-height: 40px; border: 1px solid var(--color-border); border-radius: 8px; padding: 0 10px; background: var(--color-surface); color: var(--color-text);"
+              [value]="manualTripDriverId"
+              (change)="updateManualTripDriver($any($event.target).value)"
+            >
+              <option value="">{{ 'planning.manual_trip_select_driver' | translate }}</option>
+              @for (driver of driverOptions; track driver.value) {
+              <option [value]="driver.value">{{ driver.label }}</option>
+              }
+            </select>
+          </label>
+
+          <label style="display: grid; gap: 6px; color: var(--color-text-muted); font-size: 13px; font-weight: 800;">
+            {{ 'planning.vehicle' | translate }}
+            <select
+              style="min-height: 40px; border: 1px solid var(--color-border); border-radius: 8px; padding: 0 10px; background: var(--color-surface); color: var(--color-text);"
+              [value]="manualTripVehicleId"
+              (change)="updateManualTripVehicle($any($event.target).value)"
+            >
+              <option value="">{{ 'planning.manual_trip_select_vehicle' | translate }}</option>
+              @for (vehicle of vehicleOptions; track vehicle.value) {
+              <option [value]="vehicle.value">{{ vehicle.label }}</option>
+              }
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section style="display: grid; gap: 12px; padding: 14px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background);">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+          <div>
+            <strong>{{ 'planning.manual_trip_orders' | translate }}</strong>
+            <p style="margin: 6px 0 0; color: var(--color-text-muted);">{{ 'planning.manual_trip_orders_description' | translate }}</p>
+          </div>
+          <span style="color: var(--color-text-muted); font-weight: 800;">
+            {{ manualTripOrderIds.size }} / {{ getManualTripOrders().length }}
+          </span>
+        </div>
+
+        @if (isLoadingEligibleOrders) {
+        <div class="loading-state">
+          <h2>{{ 'planning.loading_eligible_orders' | translate }}</h2>
+        </div>
+        } @else {
+        <div style="display: grid; gap: 10px;">
+          @for (order of getManualTripOrders(); track order.id) {
+          <label
+            style="display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; border: 1px solid var(--color-border); border-radius: 8px; padding: 12px; background: var(--color-surface); color: var(--color-text); cursor: pointer;"
+          >
+            <input
+              type="checkbox"
+              style="margin-top: 3px; width: 18px; height: 18px; accent-color: var(--color-primary);"
+              [checked]="isManualTripOrderSelected(order.id)"
+              (change)="toggleManualTripOrder(order.id)"
+            />
+            <span style="display: grid; gap: 7px;">
+              <span style="display: flex; justify-content: space-between; gap: 10px;">
+                <strong>{{ order.order_ref }}</strong>
+                <span style="color: var(--color-primary); font-weight: 800;">{{ getPriorityKey(order.priority) | translate }}</span>
+              </span>
+              <span style="color: var(--color-text-muted);">{{ order.client_name || ('vehicles.not_available' | translate) }}</span>
+              <span>{{ order.address_pickup }} -> {{ order.address_delivery }}</span>
+              <span style="display: flex; flex-wrap: wrap; gap: 8px; color: var(--color-text-muted);">
+                <span>{{ order.kg }} kg</span>
+                <span>{{ order.m3 }} m3</span>
+                <span>{{ getCargoTypeKey(order.type_marfa) | translate }}</span>
+                <span>{{ 'orders.delivery_deadline' | translate }}: {{ order.delivery_deadline }}</span>
+              </span>
+            </span>
+          </label>
+          } @empty {
+          <p style="margin: 0; color: var(--color-text-muted);">{{ 'planning.manual_trip_empty_orders' | translate }}</p>
+          }
+        </div>
+        }
+      </section>
+
+      @if (manualTripPreview) {
+      <section style="display: grid; gap: 12px; padding: 14px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background);">
+        <div style="display: flex; justify-content: space-between; gap: 12px; align-items: flex-start;">
+          <div>
+            <strong>{{ 'planning.manual_trip_preview_title' | translate }}</strong>
+            <p style="margin: 6px 0 0; color: var(--color-text-muted);">{{ manualTripPreview.message }}</p>
+          </div>
+          @if (manualTripPreview.warnings_count) {
+          <span style="padding: 8px 10px; border-radius: 999px; background: rgba(245, 158, 11, 0.16); color: #92400e; font-weight: 900;">
+            {{ 'planning.compare.warnings' | translate }}: {{ manualTripPreview.warnings_count }}
+          </span>
+          }
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;">
+          <div style="padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface);">
+            <span style="display: block; color: var(--color-text-muted); font-size: 12px; font-weight: 800;">{{ 'planning.compare.distance' | translate }}</span>
+            <strong>{{ manualTripPreview.planned_km }} km</strong>
+          </div>
+          <div style="padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface);">
+            <span style="display: block; color: var(--color-text-muted); font-size: 12px; font-weight: 800;">{{ 'planning.compare.duration' | translate }}</span>
+            <strong>{{ manualTripPreview.planned_duration_min }} {{ 'planning.minutes_short' | translate }}</strong>
+          </div>
+          <div style="padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface);">
+            <span style="display: block; color: var(--color-text-muted); font-size: 12px; font-weight: 800;">{{ 'planning.manual_trip_load' | translate }}</span>
+            <strong>{{ manualTripPreview.total_kg }} kg / {{ manualTripPreview.total_m3 }} m3</strong>
+          </div>
+          <div style="padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface);">
+            <span style="display: block; color: var(--color-text-muted); font-size: 12px; font-weight: 800;">{{ 'planning.manual_trip_interval' | translate }}</span>
+            <strong>{{ manualTripPreview.trip_start_time }} - {{ manualTripPreview.trip_end_time }}</strong>
+          </div>
+        </div>
+
+        @if (manualTripPreview.warnings.length) {
+        <div style="display: grid; gap: 8px;">
+          @for (warning of manualTripPreview.warnings; track warning.type + '-' + warning.order_ref + '-' + $index) {
+          <div style="padding: 10px; border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; background: rgba(245, 158, 11, 0.14); color: #92400e; font-weight: 800;">
+            @if (warning.order_ref) {
+            <span>{{ warning.order_ref }}: </span>
+            }
+            <span>{{ warning.message }}</span>
+          </div>
+          }
+        </div>
+        }
+
+        <div style="display: grid; gap: 8px;">
+          <strong>{{ 'planning.manual_trip_stops' | translate }}</strong>
+          @for (stop of manualTripPreview.stops; track stop.sequence) {
+          <div style="display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface);">
+            <strong>#{{ stop.sequence }}</strong>
+            <span>{{ stop.stop_type }} - {{ stop.order_ref }}</span>
+            <span style="color: var(--color-text-muted);">{{ stop.eta_planned || ('vehicles.not_available' | translate) }}</span>
+          </div>
+          }
+        </div>
+      </section>
+      }
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button
+          type="button"
+          style="border: 1px solid var(--color-border); border-radius: 8px; padding: 10px 13px; background: var(--color-surface); color: var(--color-text); cursor: pointer; font-weight: 800;"
+          (click)="closeManualTripWindow()"
+        >
+          {{ 'drivers.cancel' | translate }}
+        </button>
+        <button
+          type="button"
+          style="border: 1px solid var(--color-border); border-radius: 8px; padding: 10px 13px; background: var(--color-surface); color: var(--color-text); cursor: pointer; font-weight: 900;"
+          [disabled]="!canPreviewManualTrip()"
+          [style.opacity]="canPreviewManualTrip() ? '1' : '0.55'"
+          [style.cursor]="canPreviewManualTrip() ? 'pointer' : 'not-allowed'"
+          (click)="previewManualTrip()"
+        >
+          {{
+            isPreviewingManualTrip
+              ? ('planning.manual_trip_previewing' | translate)
+              : ('planning.manual_trip_preview' | translate)
+          }}
+        </button>
+        <button
+          type="button"
+          style="border: 1px solid var(--color-primary); border-radius: 8px; padding: 10px 13px; background: var(--color-primary); color: white; cursor: pointer; font-weight: 900;"
+          [disabled]="!canCreateManualTrip()"
+          [style.opacity]="canCreateManualTrip() ? '1' : '0.55'"
+          [style.cursor]="canCreateManualTrip() ? 'pointer' : 'not-allowed'"
+          (click)="createManualTrip()"
+        >
+          {{
+            isCreatingManualTrip
+              ? ('planning.manual_trip_creating' | translate)
+              : ('planning.manual_trip_create' | translate)
+          }}
+        </button>
+      </div>
+    </div>
+  </section>
+  }
 
   @if (selectedEditTrip; as trip) {
   <div
