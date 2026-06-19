@@ -72,63 +72,63 @@
     </div>
     }
 
-    <div class="options-menu" (click)="$event.stopPropagation()">
-      <button
-        type="button"
-        class="options-menu__trigger"
-        [attr.aria-label]="'nav.options' | translate"
-        [attr.aria-expanded]="isOptionsMenuOpen"
-        (click)="toggleOptionsMenu()"
-      >
-        <span class="nav-icon" aria-hidden="true">⚙</span>
+    @if (isLoggedIn$ | async) {
+    <div class="navbar-action-row">
+      <button type="button" class="logout-action" (click)="logout()">
+        <span class="nav-icon" aria-hidden="true">←</span>
+        <span>{{ 'nav.logout' | translate }}</span>
       </button>
 
-      @if (isOptionsMenuOpen) {
-      <div class="options-menu__dropdown">
-        <div class="options-menu__section">
-          <button
-            type="button"
-            class="options-menu__option options-menu__option--parent"
-            [attr.aria-expanded]="isLanguageSubmenuOpen"
-            (click)="toggleLanguageSubmenu()"
-          >
-            <span class="language-icon">{{ selectedLanguage.icon }}</span>
-            <span>{{ 'nav.language' | translate }}</span>
-            <span class="options-menu__chevron" aria-hidden="true">›</span>
-          </button>
+      <div class="options-menu" (click)="$event.stopPropagation()">
+        <button
+          type="button"
+          class="options-menu__trigger"
+          [attr.aria-label]="'nav.options' | translate"
+          [attr.aria-expanded]="isOptionsMenuOpen"
+          (click)="toggleOptionsMenu()"
+        >
+          <span class="nav-icon" aria-hidden="true">⚙</span>
+        </button>
 
-          @if (isLanguageSubmenuOpen) {
-          <div class="options-menu__submenu">
-            @for (language of languages; track language.code) {
+        @if (isOptionsMenuOpen) {
+        <div class="options-menu__dropdown">
+          <div class="options-menu__section">
             <button
               type="button"
-              class="options-menu__option"
-              [class.active]="language.code === currentLanguage"
-              (click)="setLanguage(language.code)"
+              class="options-menu__option options-menu__option--parent"
+              [attr.aria-expanded]="isLanguageSubmenuOpen"
+              (click)="toggleLanguageSubmenu()"
             >
-              <span class="language-icon">{{ language.icon }}</span>
-              <span>{{ language.label }}</span>
+              <span class="language-icon">{{ selectedLanguage.icon }}</span>
+              <span>{{ 'nav.language' | translate }}</span>
+              <span class="options-menu__chevron" aria-hidden="true">›</span>
             </button>
+
+            @if (isLanguageSubmenuOpen) {
+            <div class="options-menu__submenu">
+              @for (language of languages; track language.code) {
+              <button
+                type="button"
+                class="options-menu__option"
+                [class.active]="language.code === currentLanguage"
+                (click)="setLanguage(language.code)"
+              >
+                <span class="language-icon">{{ language.icon }}</span>
+                <span>{{ language.label }}</span>
+              </button>
+              }
+            </div>
             }
+
+            <button type="button" class="options-menu__option" (click)="openChangePassword()">
+              <span class="nav-icon" aria-hidden="true">••</span>
+              <span>{{ 'change_password.title' | translate }}</span>
+            </button>
           </div>
-          }
-
-          @if (isLoggedIn$ | async) {
-          <button type="button" class="options-menu__option" (click)="openChangePassword()">
-            <span class="nav-icon" aria-hidden="true">••</span>
-            <span>{{ 'change_password.title' | translate }}</span>
-          </button>
-          }
         </div>
+        }
       </div>
-      }
     </div>
-
-    @if (isLoggedIn$ | async) {
-    <button type="button" (click)="logout()">
-      <span class="nav-icon" aria-hidden="true">←</span>
-      <span>{{ 'nav.logout' | translate }}</span>
-    </button>
     } @else {
     <a routerLink="/signup" routerLinkActive="active">
       <span class="nav-icon" aria-hidden="true">+</span>

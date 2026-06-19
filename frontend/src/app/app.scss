@@ -1,4 +1,12 @@
 .app-main {
-  min-height: calc(100vh - 64px);
+  min-height: 100vh;
+  margin-left: 264px;
   padding: 32px;
+}
+
+@media (max-width: 760px) {
+  .app-main {
+    margin-left: 0;
+    padding: 24px 16px;
+  }
 }
