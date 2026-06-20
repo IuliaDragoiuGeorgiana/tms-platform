@@ -1,13 +1,20 @@
-import { ChangeDetectorRef, Component, Inject, OnDestroy } from '@angular/core';
-import { CommonModule, DOCUMENT } from '@angular/common';
-import { HttpErrorResponse } from '@angular/common/http';
+import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { CommonModule } from '@angular/common';
 
 import { AuthService, RoleEnum } from '../../core/services/auth';
 import {
-  ServiceTimeConfigResponse,
-  SystemConfigService,
-  UpdateServiceTimeConfigRequest,
-} from '../../core/services/system-config';
+  AttentionItem,
+  ChartPoint,
+  DashboardService,
+  DispatcherDashboardData,
+  DriverWorkload,
+  ManagerDashboardData,
+  ManagerKpi,
+  ManagerPeriod,
+  StatusSlice,
+  SuperAdminKpiSection,
+  TripSummary,
+} from '../../core/services/dashboard';
 import { TranslatePipe } from '../../core/pipes/translate';
 
 interface Metric {
@@ -37,16 +44,249 @@ interface RoleDashboard {
   actions: string[];
 }
 
-interface ServiceTimeRow {
-  key: keyof ServiceTimeConfigResponse;
-  label: string;
-  value: number;
-}
+const MANAGER_DASHBOARD_DATA: Record<ManagerPeriod, ManagerDashboardData> = {
+  1: {
+    kpis: [
+      { label: 'Orders today', value: '42', detail: '+8 since morning', tone: 'good' },
+      { label: 'Delivery success', value: '94%', detail: '31 delivered, 2 failed', tone: 'good' },
+      { label: 'Active trips', value: '11', detail: '7 in progress', tone: 'neutral' },
+      { label: 'Open incidents', value: '3', detail: '1 major unresolved', tone: 'warn' },
+      { label: 'Fleet available', value: '68%', detail: '19 of 28 vehicles', tone: 'neutral' },
+    ],
+    orderTrend: [
+      { label: '08:00', value: 5 },
+      { label: '10:00', value: 9 },
+      { label: '12:00', value: 14 },
+      { label: '14:00', value: 21 },
+      { label: '16:00', value: 31 },
+      { label: '18:00', value: 42 },
+    ],
+    orderStatus: [
+      { label: 'Pending', value: 8, color: '#f59e0b' },
+      { label: 'Planned', value: 10, color: '#2563eb' },
+      { label: 'In delivery', value: 13, color: '#7c3aed' },
+      { label: 'Delivered', value: 31, color: '#16a34a' },
+      { label: 'Failed', value: 2, color: '#dc2626' },
+    ],
+    tripStatus: [
+      { label: 'Approved', value: 4 },
+      { label: 'In progress', value: 7 },
+      { label: 'Completed', value: 9 },
+      { label: 'Interrupted', value: 1 },
+    ],
+    fleetStatus: [
+      { label: 'Available', value: 19 },
+      { label: 'Reserved', value: 5 },
+      { label: 'Service', value: 3 },
+      { label: 'Damaged', value: 1 },
+    ],
+    driverStatus: [
+      { label: 'Available', value: 16 },
+      { label: 'On trip', value: 12 },
+      { label: 'Break', value: 4 },
+      { label: 'Off duty', value: 8 },
+    ],
+    driverWorkload: [
+      { driver: 'Mihai Popescu', trips: 3, stops: 21 },
+      { driver: 'Andrei Ionescu', trips: 2, stops: 18 },
+      { driver: 'Elena Radu', trips: 2, stops: 15 },
+      { driver: 'Vlad Marin', trips: 1, stops: 11 },
+    ],
+    attention: [
+      { title: 'TRP-209 delayed', detail: 'ETA slipped by 34 minutes near Brasov.', severity: 'High' },
+      { title: 'Vehicle B-742-TMS in service', detail: 'Replacement needed for tomorrow route.', severity: 'Medium' },
+      { title: '2 failed delivery stops', detail: 'Wrong address and refused delivery.', severity: 'Medium' },
+    ],
+    todayTrips: [
+      { id: 'TRP-209', driver: 'Mihai Popescu', route: 'Bucharest -> Cluj', progress: 68, status: 'In progress' },
+      { id: 'TRP-210', driver: 'Elena Radu', route: 'Brasov local', progress: 41, status: 'In progress' },
+      { id: 'TRP-211', driver: 'Andrei Ionescu', route: 'Timisoara hub', progress: 100, status: 'Completed' },
+    ],
+  },
+  7: {
+    kpis: [
+      { label: 'Orders', value: '318', detail: '+12% vs previous week', tone: 'good' },
+      { label: 'Delivery success', value: '91%', detail: '268 delivered, 18 failed', tone: 'good' },
+      { label: 'Active trips', value: '64', detail: '44 completed this week', tone: 'neutral' },
+      { label: 'Open incidents', value: '9', detail: '3 major unresolved', tone: 'warn' },
+      { label: 'Cost variance', value: '+7.4%', detail: 'Fuel and extra cost pressure', tone: 'warn' },
+    ],
+    orderTrend: [
+      { label: 'Mon', value: 38 },
+      { label: 'Tue', value: 46 },
+      { label: 'Wed', value: 51 },
+      { label: 'Thu', value: 44 },
+      { label: 'Fri', value: 57 },
+      { label: 'Sat', value: 39 },
+      { label: 'Sun', value: 43 },
+    ],
+    orderStatus: [
+      { label: 'Pending', value: 42, color: '#f59e0b' },
+      { label: 'Planned', value: 55, color: '#2563eb' },
+      { label: 'In delivery', value: 38, color: '#7c3aed' },
+      { label: 'Delivered', value: 268, color: '#16a34a' },
+      { label: 'Failed', value: 18, color: '#dc2626' },
+      { label: 'Cancelled', value: 7, color: '#64748b' },
+    ],
+    tripStatus: [
+      { label: 'Proposed', value: 9 },
+      { label: 'Approved', value: 11 },
+      { label: 'In progress', value: 8 },
+      { label: 'Completed', value: 44 },
+      { label: 'Interrupted', value: 3 },
+    ],
+    fleetStatus: [
+      { label: 'Available', value: 21 },
+      { label: 'Reserved', value: 4 },
+      { label: 'Service', value: 2 },
+      { label: 'Damaged', value: 1 },
+    ],
+    driverStatus: [
+      { label: 'Available', value: 18 },
+      { label: 'On trip', value: 10 },
+      { label: 'Break', value: 5 },
+      { label: 'Off duty', value: 7 },
+    ],
+    driverWorkload: [
+      { driver: 'Mihai Popescu', trips: 12, stops: 86 },
+      { driver: 'Andrei Ionescu', trips: 10, stops: 74 },
+      { driver: 'Elena Radu', trips: 9, stops: 69 },
+      { driver: 'Vlad Marin', trips: 8, stops: 61 },
+    ],
+    attention: [
+      { title: '3 unresolved major incidents', detail: 'Two vehicle issues and one route interruption.', severity: 'High' },
+      { title: '18 failed orders', detail: 'Failure rate above weekly target by 1.8%.', severity: 'Medium' },
+      { title: 'Fuel cost variance +9%', detail: 'Actual fuel spend exceeded plan on long routes.', severity: 'Medium' },
+    ],
+    todayTrips: [
+      { id: 'TRP-244', driver: 'Mihai Popescu', route: 'North region deliveries', progress: 75, status: 'In progress' },
+      { id: 'TRP-246', driver: 'Vlad Marin', route: 'Bucharest local', progress: 52, status: 'In progress' },
+      { id: 'TRP-247', driver: 'Elena Radu', route: 'West hub transfer', progress: 18, status: 'Approved' },
+    ],
+  },
+  30: {
+    kpis: [
+      { label: 'Orders', value: '1,428', detail: '+8.6% vs previous month', tone: 'good' },
+      { label: 'Delivery success', value: '89%', detail: '1,173 delivered, 92 failed', tone: 'warn' },
+      { label: 'Trips completed', value: '214', detail: '31 recovery trips', tone: 'neutral' },
+      { label: 'Open incidents', value: '17', detail: '5 major unresolved', tone: 'danger' },
+      { label: 'Cost variance', value: '+5.9%', detail: 'Actual above plan', tone: 'warn' },
+    ],
+    orderTrend: [
+      { label: 'W1', value: 302 },
+      { label: 'W2', value: 347 },
+      { label: 'W3', value: 361 },
+      { label: 'W4', value: 418 },
+    ],
+    orderStatus: [
+      { label: 'Pending', value: 124, color: '#f59e0b' },
+      { label: 'Planned', value: 185, color: '#2563eb' },
+      { label: 'In delivery', value: 96, color: '#7c3aed' },
+      { label: 'Delivered', value: 1173, color: '#16a34a' },
+      { label: 'Failed', value: 92, color: '#dc2626' },
+      { label: 'Cancelled', value: 31, color: '#64748b' },
+    ],
+    tripStatus: [
+      { label: 'Proposed', value: 22 },
+      { label: 'Approved', value: 34 },
+      { label: 'In progress', value: 14 },
+      { label: 'Completed', value: 214 },
+      { label: 'Interrupted', value: 12 },
+      { label: 'Cancelled', value: 8 },
+    ],
+    fleetStatus: [
+      { label: 'Available', value: 20 },
+      { label: 'Reserved', value: 5 },
+      { label: 'Service', value: 2 },
+      { label: 'Damaged', value: 1 },
+    ],
+    driverStatus: [
+      { label: 'Available', value: 17 },
+      { label: 'On trip', value: 12 },
+      { label: 'Break', value: 3 },
+      { label: 'Off duty', value: 8 },
+    ],
+    driverWorkload: [
+      { driver: 'Mihai Popescu', trips: 41, stops: 302 },
+      { driver: 'Andrei Ionescu', trips: 37, stops: 284 },
+      { driver: 'Elena Radu', trips: 34, stops: 261 },
+      { driver: 'Vlad Marin', trips: 29, stops: 226 },
+    ],
+    attention: [
+      { title: 'Delivery success below target', detail: '89% vs 92% monthly target.', severity: 'High' },
+      { title: '17 unresolved incidents', detail: 'Major incidents remain open beyond SLA.', severity: 'High' },
+      { title: '31 recovery trips', detail: 'Recovery volume suggests planning or address quality issues.', severity: 'Medium' },
+    ],
+    todayTrips: [
+      { id: 'TRP-318', driver: 'Andrei Ionescu', route: 'Cluj -> Oradea', progress: 88, status: 'In progress' },
+      { id: 'TRP-320', driver: 'Mihai Popescu', route: 'Bucharest -> Iasi', progress: 63, status: 'In progress' },
+      { id: 'TRP-321', driver: 'Elena Radu', route: 'Constanta local', progress: 24, status: 'Approved' },
+    ],
+  },
+};
 
-interface ServiceTimeGroup {
-  title: string;
-  rows: ServiceTimeRow[];
-}
+const SUPER_ADMIN_KPI_SECTIONS: SuperAdminKpiSection[] = [
+  {
+    title: 'Tenant health',
+    description: 'Company activation, setup progress, and platform access.',
+    kpis: [
+      { label: 'Active companies', value: '18', detail: '2 added this month', tone: 'good' },
+      { label: 'Pending setup', value: '3', detail: 'Missing manager or config', tone: 'warn' },
+      { label: 'Disabled companies', value: '2', detail: 'Require admin review', tone: 'danger' },
+      { label: 'Companies with activity', value: '83%', detail: '15 of 18 active this week', tone: 'neutral' },
+    ],
+  },
+  {
+    title: 'Accounts and approvals',
+    description: 'User governance across all companies.',
+    kpis: [
+      { label: 'Total users', value: '426', detail: 'Across all tenants', tone: 'neutral' },
+      { label: 'Managers', value: '42', detail: '3 pending invites', tone: 'neutral' },
+      { label: 'Pending approvals', value: '17', detail: 'Clients and employees waiting', tone: 'warn' },
+      { label: 'Inactive users', value: '31', detail: 'No activity in 30 days', tone: 'warn' },
+    ],
+  },
+  {
+    title: 'Platform volume',
+    description: 'Cross-tenant transport activity and growth.',
+    kpis: [
+      { label: 'Orders this month', value: '12.8k', detail: '+14% vs previous month', tone: 'good' },
+      { label: 'Trips completed', value: '2,146', detail: 'Platform-wide', tone: 'good' },
+      { label: 'Vehicles registered', value: '318', detail: '26 currently in service', tone: 'neutral' },
+      { label: 'Drivers registered', value: '504', detail: '438 approved', tone: 'neutral' },
+    ],
+  },
+  {
+    title: 'Risk and operations',
+    description: 'Issues that need platform-level attention.',
+    kpis: [
+      { label: 'Open incidents', value: '24', detail: '6 high priority', tone: 'danger' },
+      { label: 'Failed deliveries', value: '3.8%', detail: 'Last 30 days', tone: 'warn' },
+      { label: 'Password reset requests', value: '39', detail: 'Requested in last 30 days', tone: 'neutral' },
+    ],
+  },
+];
+
+const DISPATCHER_DASHBOARD_DATA: DispatcherDashboardData = {
+  kpis: [
+    { label: 'Ongoing trips', value: '7', detail: '42 stops in execution', tone: 'neutral' },
+    { label: 'Orders to be planned', value: '23', detail: 'Pending orders without assigned delivery date', tone: 'warn' },
+    { label: 'Need attention', value: '9', detail: 'Orders, trips, stops, and incidents', tone: 'warn' },
+    { label: 'Unassigned trips', value: '4', detail: 'Missing driver or vehicle', tone: 'warn' },
+    { label: 'Available drivers', value: '16', detail: '40 total drivers', tone: 'good' },
+    { label: 'Available vehicles', value: '19', detail: '28 total vehicles', tone: 'good' },
+    { label: 'Planning sessions', value: '2', detail: 'Draft or proposed plans', tone: 'neutral' },
+  ],
+  ongoingTrips: [
+    { id: 'TRP-209', driver: 'Mihai Popescu', route: 'Bucharest -> Cluj', progress: 68, status: 'In Progress' },
+    { id: 'TRP-210', driver: 'Elena Radu', route: 'Brasov local', progress: 41, status: 'In Progress' },
+  ],
+  attention: [
+    { title: '2 trips missing driver or vehicle', detail: 'Trips cannot be executed until driver and vehicle are assigned.', severity: 'Medium' },
+    { title: '3 problematic orders', detail: 'Orders were marked problematic and need review before planning.', severity: 'Medium' },
+    { title: '1 interrupted trip', detail: 'Interrupted trips may need recovery planning.', severity: 'High' },
+  ],
+};
 
 const ROLE_DASHBOARDS: Record<RoleEnum, RoleDashboard> = {
   [RoleEnum.SUPER_ADMIN]: {
@@ -248,179 +488,169 @@ const ROLE_DASHBOARDS: Record<RoleEnum, RoleDashboard> = {
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })
-export class Dashboard implements OnDestroy {
+export class Dashboard implements OnInit {
+  readonly periodOptions: ManagerPeriod[] = [1, 7, 30];
+
   currentRole: RoleEnum;
   roleLabel: string;
   dashboard: RoleDashboard;
-  isServiceTimeWindowOpen = false;
-  isLoadingServiceTimes = false;
-  isSavingServiceTimes = false;
-  serviceTimeError = '';
-  serviceTimeSuccess = '';
-  serviceTimeConfig: ServiceTimeConfigResponse | null = null;
-  originalServiceTimeConfig: ServiceTimeConfigResponse | null = null;
-  serviceTimeGroups: ServiceTimeGroup[] = [];
+  selectedPeriod: ManagerPeriod = 7;
+  managerDashboardData: ManagerDashboardData = MANAGER_DASHBOARD_DATA[this.selectedPeriod];
+  superAdminDashboardSections: SuperAdminKpiSection[] = SUPER_ADMIN_KPI_SECTIONS;
+  dispatcherDashboardData: DispatcherDashboardData = DISPATCHER_DASHBOARD_DATA;
+  isLoadingManagerDashboard = false;
+  isLoadingSuperAdminDashboard = false;
+  isLoadingDispatcherDashboard = false;
 
   constructor(
     private authService: AuthService,
-    private systemConfigService: SystemConfigService,
+    private dashboardService: DashboardService,
     private changeDetectorRef: ChangeDetectorRef,
-    @Inject(DOCUMENT) private document: Document,
   ) {
     this.currentRole = this.authService.getCurrentRole();
     this.roleLabel = `dashboard.role.${this.currentRole}`;
     this.dashboard = ROLE_DASHBOARDS[this.currentRole];
   }
 
-  ngOnDestroy(): void {
-    this.unlockBackgroundScroll();
+  ngOnInit(): void {
+    if (this.isManagerDashboard) {
+      this.loadManagerDashboard();
+    } else if (this.isSuperAdminDashboard) {
+      this.loadSuperAdminDashboard();
+    } else if (this.isDispatcherDashboard) {
+      this.loadDispatcherDashboard();
+    }
   }
 
-  get isManager(): boolean {
+  get isManagerDashboard(): boolean {
     return this.currentRole === RoleEnum.MANAGER;
   }
 
-  openServiceTimeWindow(): void {
-    if (!this.isManager) {
-      return;
-    }
-
-    this.isServiceTimeWindowOpen = true;
-    this.serviceTimeError = '';
-    this.serviceTimeSuccess = '';
-    this.serviceTimeConfig = null;
-    this.originalServiceTimeConfig = null;
-    this.serviceTimeGroups = [];
-    this.loadServiceTimes();
-    this.lockBackgroundScroll();
-    this.changeDetectorRef.detectChanges();
+  get isSuperAdminDashboard(): boolean {
+    return this.currentRole === RoleEnum.SUPER_ADMIN;
   }
 
-  closeServiceTimeWindow(): void {
-    this.isServiceTimeWindowOpen = false;
-    this.isLoadingServiceTimes = false;
-    this.isSavingServiceTimes = false;
-    this.serviceTimeError = '';
-    this.serviceTimeSuccess = '';
-    this.serviceTimeConfig = null;
-    this.originalServiceTimeConfig = null;
-    this.serviceTimeGroups = [];
-    this.unlockBackgroundScroll();
-    this.changeDetectorRef.detectChanges();
+  get isDispatcherDashboard(): boolean {
+    return this.currentRole === RoleEnum.DISPECER;
   }
 
-  private loadServiceTimes(): void {
-    this.isLoadingServiceTimes = true;
-    this.serviceTimeError = '';
-    this.serviceTimeSuccess = '';
+  get managerData(): ManagerDashboardData {
+    return this.managerDashboardData;
+  }
+
+  get superAdminData(): SuperAdminKpiSection[] {
+    return this.superAdminDashboardSections;
+  }
+
+  get dispatcherData(): DispatcherDashboardData {
+    return this.dispatcherDashboardData;
+  }
+
+  get maxOrderTrendValue(): number {
+    return Math.max(...this.managerData.orderTrend.map((point) => point.value), 1);
+  }
+
+  get maxTripStatusValue(): number {
+    return Math.max(...this.managerData.tripStatus.map((point) => point.value), 1);
+  }
+
+  get maxFleetStatusValue(): number {
+    return Math.max(...this.managerData.fleetStatus.map((point) => point.value), 1);
+  }
+
+  get maxDriverStatusValue(): number {
+    return Math.max(...this.managerData.driverStatus.map((point) => point.value), 1);
+  }
+
+  get maxDriverTrips(): number {
+    return Math.max(...this.managerData.driverWorkload.map((driver) => driver.trips), 1);
+  }
+
+  get orderStatusTotal(): number {
+    return this.managerData.orderStatus.reduce((sum, item) => sum + item.value, 0);
+  }
+
+  get orderStatusDonut(): string {
+    let cursor = 0;
+    const total = Math.max(this.orderStatusTotal, 1);
+    const segments = this.managerData.orderStatus.map((item) => {
+      const start = cursor;
+      cursor += (item.value / total) * 100;
+      return `${item.color} ${start}% ${cursor}%`;
+    });
+
+    return `conic-gradient(${segments.join(', ')})`;
+  }
+
+  selectPeriod(period: ManagerPeriod): void {
+    this.selectedPeriod = period;
+    this.managerDashboardData = MANAGER_DASHBOARD_DATA[period];
+    this.loadManagerDashboard();
+  }
+
+  barHeight(value: number, max: number): string {
+    return `${Math.max((value / max) * 100, 6)}%`;
+  }
+
+  barWidth(value: number, max: number): string {
+    return `${Math.max((value / max) * 100, 4)}%`;
+  }
+
+  periodLabel(period: ManagerPeriod): string {
+    return period === 1 ? 'Last 1 day' : `Last ${period} days`;
+  }
+
+  private loadManagerDashboard(): void {
+    this.isLoadingManagerDashboard = true;
     this.changeDetectorRef.detectChanges();
 
-    this.systemConfigService.getServiceTimeConfig().subscribe({
-      next: (config) => {
-        this.serviceTimeConfig = { ...config };
-        this.originalServiceTimeConfig = { ...config };
-        this.serviceTimeGroups = this.buildServiceTimeGroups(config);
-        this.isLoadingServiceTimes = false;
+    this.dashboardService.getManagerDashboard(this.selectedPeriod).subscribe({
+      next: (data) => {
+        this.managerDashboardData = data;
+        this.isLoadingManagerDashboard = false;
         this.changeDetectorRef.detectChanges();
       },
-      error: (error: HttpErrorResponse) => {
-        this.serviceTimeError = error.error?.detail ?? 'common.error_generic';
-        this.isLoadingServiceTimes = false;
+      error: () => {
+        this.managerDashboardData = MANAGER_DASHBOARD_DATA[this.selectedPeriod];
+        this.isLoadingManagerDashboard = false;
         this.changeDetectorRef.detectChanges();
       },
     });
   }
 
-  updateServiceTimeValue(key: keyof ServiceTimeConfigResponse, value: string): void {
-    if (!this.serviceTimeConfig) {
-      return;
-    }
-
-    const parsedValue = Number(value);
-    this.serviceTimeConfig = {
-      ...this.serviceTimeConfig,
-      [key]: Number.isFinite(parsedValue) ? parsedValue : 0,
-    };
-    this.serviceTimeGroups = this.buildServiceTimeGroups(this.serviceTimeConfig);
-    this.serviceTimeError = '';
-    this.serviceTimeSuccess = '';
-    this.changeDetectorRef.detectChanges();
-  }
-
-  hasServiceTimeChanges(): boolean {
-    const current = this.serviceTimeConfig;
-    const original = this.originalServiceTimeConfig;
-
-    if (!current || !original) {
-      return false;
-    }
-
-    return (Object.keys(current) as Array<keyof ServiceTimeConfigResponse>).some(
-      (key) => current[key] !== original[key],
-    );
-  }
-
-  saveServiceTimes(): void {
-    if (!this.serviceTimeConfig || !this.hasServiceTimeChanges()) {
-      return;
-    }
-
-    this.isSavingServiceTimes = true;
-    this.serviceTimeError = '';
-    this.serviceTimeSuccess = '';
+  private loadSuperAdminDashboard(): void {
+    this.isLoadingSuperAdminDashboard = true;
     this.changeDetectorRef.detectChanges();
 
-    const payload: UpdateServiceTimeConfigRequest = { ...this.serviceTimeConfig };
-
-    this.systemConfigService.updateServiceTimeConfig(payload).subscribe({
-      next: (config) => {
-        this.serviceTimeConfig = { ...config };
-        this.originalServiceTimeConfig = { ...config };
-        this.serviceTimeGroups = this.buildServiceTimeGroups(config);
-        this.isSavingServiceTimes = false;
-        this.serviceTimeSuccess = 'dashboard.service_time.save_success';
+    this.dashboardService.getSuperAdminDashboard().subscribe({
+      next: (data) => {
+        this.superAdminDashboardSections = data.sections;
+        this.isLoadingSuperAdminDashboard = false;
         this.changeDetectorRef.detectChanges();
       },
-      error: (error: HttpErrorResponse) => {
-        this.serviceTimeError = error.error?.detail ?? 'common.error_generic';
-        this.isSavingServiceTimes = false;
+      error: () => {
+        this.superAdminDashboardSections = SUPER_ADMIN_KPI_SECTIONS;
+        this.isLoadingSuperAdminDashboard = false;
         this.changeDetectorRef.detectChanges();
       },
     });
   }
 
-  private buildServiceTimeGroups(config: ServiceTimeConfigResponse): ServiceTimeGroup[] {
-    const rows: ServiceTimeRow[] = [
-      { key: 'standard_pickup_service_min', label: 'dashboard.service_time.standard_pickup', value: config.standard_pickup_service_min },
-      { key: 'standard_delivery_service_min', label: 'dashboard.service_time.standard_delivery', value: config.standard_delivery_service_min },
-      { key: 'fragil_pickup_service_min', label: 'dashboard.service_time.fragile_pickup', value: config.fragil_pickup_service_min },
-      { key: 'fragil_delivery_service_min', label: 'dashboard.service_time.fragile_delivery', value: config.fragil_delivery_service_min },
-      { key: 'perisabil_pickup_service_min', label: 'dashboard.service_time.perishable_pickup', value: config.perisabil_pickup_service_min },
-      { key: 'perisabil_delivery_service_min', label: 'dashboard.service_time.perishable_delivery', value: config.perisabil_delivery_service_min },
-      { key: 'adr_pickup_service_min', label: 'dashboard.service_time.adr_pickup', value: config.adr_pickup_service_min },
-      { key: 'adr_delivery_service_min', label: 'dashboard.service_time.adr_delivery', value: config.adr_delivery_service_min },
-      { key: 'service_extra_minutes_per_500kg', label: 'dashboard.service_time.extra_kg', value: config.service_extra_minutes_per_500kg },
-      { key: 'service_extra_minutes_per_5m3', label: 'dashboard.service_time.extra_m3', value: config.service_extra_minutes_per_5m3 },
-      { key: 'service_max_minutes', label: 'dashboard.service_time.max_minutes', value: config.service_max_minutes },
-    ];
+  private loadDispatcherDashboard(): void {
+    this.isLoadingDispatcherDashboard = true;
+    this.changeDetectorRef.detectChanges();
 
-    return [
-      {
-        title: 'dashboard.service_time.base_group',
-        rows: rows.slice(0, 8),
+    this.dashboardService.getDispatcherDashboard().subscribe({
+      next: (data) => {
+        this.dispatcherDashboardData = data;
+        this.isLoadingDispatcherDashboard = false;
+        this.changeDetectorRef.detectChanges();
       },
-      {
-        title: 'dashboard.service_time.adjustments_group',
-        rows: rows.slice(8),
+      error: () => {
+        this.dispatcherDashboardData = DISPATCHER_DASHBOARD_DATA;
+        this.isLoadingDispatcherDashboard = false;
+        this.changeDetectorRef.detectChanges();
       },
-    ];
-  }
-
-  private lockBackgroundScroll(): void {
-    this.document.body.classList.add('modal-scroll-lock');
-  }
-
-  private unlockBackgroundScroll(): void {
-    this.document.body.classList.remove('modal-scroll-lock');
+    });
   }
 }

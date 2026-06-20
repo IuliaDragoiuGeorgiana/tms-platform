@@ -38,8 +38,7 @@
 .primary-action,
 .secondary-action,
 .icon-action,
-.row-action,
-.manager-actions button {
+.row-action {
   border: 1px solid var(--color-border);
   border-radius: 8px;
   cursor: pointer;
@@ -87,19 +86,6 @@
   border-color: var(--color-primary);
   background: var(--color-primary);
   color: white;
-}
-
-.manager-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 20px;
-
-  button {
-    padding: 10px 12px;
-    background: var(--color-surface);
-    color: var(--color-text);
-  }
 }
 
 .row-action {

@@ -24,7 +24,17 @@
           <h2>{{ 'planning.queue_title' | translate }}</h2>
           <p>{{ 'planning.queue_description' | translate }}</p>
         </div>
-        <span>{{ planningQueue.length }}</span>
+        <div class="planning-panel-actions">
+          <span>{{ planningQueue.length }}</span>
+          <button type="button" [disabled]="isComparingStrategies" (click)="compareStrategies()">
+            {{
+              (isComparingStrategies
+                ? 'planning.action.comparing_strategies'
+                : 'planning.action.compare_strategies'
+              ) | translate
+            }}
+          </button>
+        </div>
       </div>
 
       <div class="planning-queue-controls">
@@ -50,15 +60,6 @@
 
         <button type="button" [disabled]="isLoadingEligibleOrders" (click)="applyPlanningInterval()">
           {{ 'planning.apply_interval' | translate }}
-        </button>
-
-        <button type="button" [disabled]="isComparingStrategies" (click)="compareStrategies()">
-          {{
-            (isComparingStrategies
-              ? 'planning.action.comparing_strategies'
-              : 'planning.action.compare_strategies'
-            ) | translate
-          }}
         </button>
       </div>
 

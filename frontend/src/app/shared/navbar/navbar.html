@@ -1,43 +1,196 @@
 <nav class="navbar">
-  <a routerLink="/" class="navbar__brand">{{ 'app.brand' | translate }}</a>
+  <div class="navbar__top">
+    <a routerLink="/" class="navbar__brand">{{ 'app.brand' | translate }}</a>
+
+    <div class="navbar__actions">
+      @if ((isLoggedIn$ | async) && currentUser) {
+      <div class="navbar-profile">
+        <strong>{{ currentUser.full_name }}</strong>
+        <span>{{ 'dashboard.role.' + currentUser.role | translate }}</span>
+        @if (currentRole !== RoleEnum.SUPER_ADMIN && currentUser.company_name) {
+        <span>{{ 'nav.company' | translate }}: {{ currentUser.company_name }}</span>
+        }
+      </div>
+      }
+
+      @if (isLoggedIn$ | async) {
+      <div class="navbar-action-row">
+        <button type="button" class="logout-action" (click)="logout()">
+          <app-icon class="nav-icon" name="log-out" />
+          <span>{{ 'nav.logout' | translate }}</span>
+        </button>
+
+        <div class="options-menu" (click)="$event.stopPropagation()">
+          <button
+            type="button"
+            class="options-menu__trigger"
+            [attr.aria-label]="'nav.options' | translate"
+            [attr.aria-expanded]="isOptionsMenuOpen"
+            (click)="toggleOptionsMenu()"
+          >
+            <app-icon class="nav-icon" name="gear" />
+          </button>
+
+          @if (isOptionsMenuOpen) {
+          <div class="options-menu__dropdown">
+            <div class="options-menu__section">
+              <button
+                type="button"
+                class="options-menu__option options-menu__option--parent"
+                [attr.aria-expanded]="isLanguageSubmenuOpen"
+                (click)="toggleLanguageSubmenu()"
+              >
+                <span class="language-icon">{{ selectedLanguage.icon }}</span>
+                <span>{{ 'nav.language' | translate }}</span>
+                <span class="options-menu__chevron" aria-hidden="true">›</span>
+              </button>
+
+              @if (isLanguageSubmenuOpen) {
+              <div class="options-menu__submenu">
+                @for (language of languages; track language.code) {
+                <button
+                  type="button"
+                  class="options-menu__option"
+                  [class.active]="language.code === currentLanguage"
+                  (click)="setLanguage(language.code)"
+                >
+                  <span class="language-icon">{{ language.icon }}</span>
+                  <span>{{ language.label }}</span>
+                </button>
+                }
+              </div>
+              }
+
+              <button type="button" class="options-menu__option" (click)="toggleTheme()">
+                <app-icon class="nav-icon" [name]="themeIcon" />
+                <span>
+                  {{
+                    (currentTheme === 'dark' ? 'nav.theme_light' : 'nav.theme_dark')
+                      | translate
+                  }}
+                </span>
+              </button>
+
+              <button type="button" class="options-menu__option" (click)="openChangePassword()">
+                <app-icon class="nav-icon" name="lock" />
+                <span>{{ 'change_password.title' | translate }}</span>
+              </button>
+            </div>
+          </div>
+          }
+        </div>
+      </div>
+      } @else {
+      <div class="navbar-action-row navbar-action-row--guest">
+        <a routerLink="/signup" routerLinkActive="active">
+          <app-icon class="nav-icon" name="user-plus" />
+          <span>{{ 'nav.signup' | translate }}</span>
+        </a>
+        <a routerLink="/login" routerLinkActive="active">
+          <app-icon class="nav-icon" name="log-in" />
+          <span>{{ 'nav.login' | translate }}</span>
+        </a>
+
+        <div class="options-menu" (click)="$event.stopPropagation()">
+          <button
+            type="button"
+            class="options-menu__trigger"
+            [attr.aria-label]="'nav.options' | translate"
+            [attr.aria-expanded]="isOptionsMenuOpen"
+            (click)="toggleOptionsMenu()"
+          >
+            <app-icon class="nav-icon" name="gear" />
+          </button>
+
+          @if (isOptionsMenuOpen) {
+          <div class="options-menu__dropdown">
+            <div class="options-menu__section">
+              <button
+                type="button"
+                class="options-menu__option options-menu__option--parent"
+                [attr.aria-expanded]="isLanguageSubmenuOpen"
+                (click)="toggleLanguageSubmenu()"
+              >
+                <span class="language-icon">{{ selectedLanguage.icon }}</span>
+                <span>{{ 'nav.language' | translate }}</span>
+                <span class="options-menu__chevron" aria-hidden="true">›</span>
+              </button>
+
+              @if (isLanguageSubmenuOpen) {
+              <div class="options-menu__submenu">
+                @for (language of languages; track language.code) {
+                <button
+                  type="button"
+                  class="options-menu__option"
+                  [class.active]="language.code === currentLanguage"
+                  (click)="setLanguage(language.code)"
+                >
+                  <span class="language-icon">{{ language.icon }}</span>
+                  <span>{{ language.label }}</span>
+                </button>
+                }
+              </div>
+              }
+
+              <button type="button" class="options-menu__option" (click)="toggleTheme()">
+                <app-icon class="nav-icon" [name]="themeIcon" />
+                <span>
+                  {{
+                    (currentTheme === 'dark' ? 'nav.theme_light' : 'nav.theme_dark')
+                      | translate
+                  }}
+                </span>
+              </button>
+            </div>
+          </div>
+          }
+        </div>
+      </div>
+      }
+    </div>
+  </div>
 
   <div class="navbar__center">
     @if (currentRole !== RoleEnum.GUEST) {
     <a routerLink="/tracking" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">⌖</span>
+      <app-icon class="nav-icon" name="map-pin" />
       <span>{{ 'nav.tracking' | translate }}</span>
     </a>
     }
 
     @if (currentRole === RoleEnum.SUPER_ADMIN) {
     <a routerLink="/companies" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">▦</span>
+      <app-icon class="nav-icon" name="users" />
       <span>{{ 'nav.companies' | translate }}</span>
     </a>
     <a routerLink="/clients" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">◎</span>
+      <app-icon class="nav-icon" name="users" />
       <span>{{ 'nav.clients' | translate }}</span>
     </a>
     } @if (currentRole === RoleEnum.MANAGER) {
     <a routerLink="/clients" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">◎</span>
+      <app-icon class="nav-icon" name="users" />
       <span>{{ 'nav.clients' | translate }}</span>
     </a>
     <a routerLink="/employees" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">◫</span>
+      <app-icon class="nav-icon" name="user-cog" />
       <span>{{ 'nav.employees' | translate }}</span>
     </a>
     <a routerLink="/drivers" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">●</span>
+      <app-icon class="nav-icon" name="truck" />
       <span>{{ 'nav.drivers' | translate }}</span>
     </a>
     <a routerLink="/vehicles" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">▣</span>
+      <app-icon class="nav-icon" name="car" />
       <span>{{ 'nav.vehicles' | translate }}</span>
     </a>
+    <button type="button" (click)="openServiceTimeWindow()">
+      <app-icon class="nav-icon" name="clock" />
+      <span>{{ 'dashboard.action.service_time' | translate }}</span>
+    </button>
     } @if (currentRole === RoleEnum.MANAGER || currentRole === RoleEnum.DISPECER) {
     <a routerLink="/planning" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">◇</span>
+      <app-icon class="nav-icon" name="route" />
       <span>{{ 'nav.planning' | translate }}</span>
     </a>
     } @if (
@@ -46,7 +199,7 @@
       currentRole === RoleEnum.SOFER
     ) {
     <a routerLink="/trips" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">⇄</span>
+      <app-icon class="nav-icon" name="arrow-right-left" />
       <span>{{ 'nav.trips' | translate }}</span>
     </a>
     } @if (
@@ -55,89 +208,88 @@
       currentRole === RoleEnum.CLIENT
     ) {
     <a routerLink="/orders" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">≡</span>
+      <app-icon class="nav-icon" name="clipboard-list" />
       <span>{{ 'nav.orders' | translate }}</span>
     </a>
     }
   </div>
 
-  <div class="navbar__actions">
-    @if ((isLoggedIn$ | async) && currentUser) {
-    <div class="navbar-profile">
-      <strong>{{ currentUser.full_name }}</strong>
-      <span>{{ 'dashboard.role.' + currentUser.role | translate }}</span>
-      @if (currentRole !== RoleEnum.SUPER_ADMIN && currentUser.company_name) {
-      <span>{{ 'nav.company' | translate }}: {{ currentUser.company_name }}</span>
-      }
+</nav>
+
+@if (isServiceTimeWindowOpen) {
+<div class="service-time-backdrop" (click)="closeServiceTimeWindow()"></div>
+
+<section
+  class="service-time-modal"
+  role="dialog"
+  aria-modal="true"
+  [attr.aria-label]="'dashboard.service_time.title' | translate"
+  (click)="$event.stopPropagation()"
+>
+  <div class="service-time-modal__header">
+    <div>
+      <h2>{{ 'dashboard.service_time.title' | translate }}</h2>
+      <span>{{ 'dashboard.service_time.description' | translate }}</span>
     </div>
-    }
+    <button type="button" class="service-time-modal__close" (click)="closeServiceTimeWindow()">
+      {{ 'orders.close' | translate }}
+    </button>
+  </div>
 
-    @if (isLoggedIn$ | async) {
-    <div class="navbar-action-row">
-      <button type="button" class="logout-action" (click)="logout()">
-        <span class="nav-icon" aria-hidden="true">←</span>
-        <span>{{ 'nav.logout' | translate }}</span>
-      </button>
+  @if (serviceTimeError) {
+  <div class="service-time-alert service-time-alert--error">{{ serviceTimeError | translate }}</div>
+  }
+  @if (serviceTimeSuccess) {
+  <div class="service-time-alert service-time-alert--success">{{ serviceTimeSuccess | translate }}</div>
+  }
 
-      <div class="options-menu" (click)="$event.stopPropagation()">
-        <button
-          type="button"
-          class="options-menu__trigger"
-          [attr.aria-label]="'nav.options' | translate"
-          [attr.aria-expanded]="isOptionsMenuOpen"
-          (click)="toggleOptionsMenu()"
-        >
-          <span class="nav-icon" aria-hidden="true">⚙</span>
-        </button>
-
-        @if (isOptionsMenuOpen) {
-        <div class="options-menu__dropdown">
-          <div class="options-menu__section">
-            <button
-              type="button"
-              class="options-menu__option options-menu__option--parent"
-              [attr.aria-expanded]="isLanguageSubmenuOpen"
-              (click)="toggleLanguageSubmenu()"
-            >
-              <span class="language-icon">{{ selectedLanguage.icon }}</span>
-              <span>{{ 'nav.language' | translate }}</span>
-              <span class="options-menu__chevron" aria-hidden="true">›</span>
-            </button>
-
-            @if (isLanguageSubmenuOpen) {
-            <div class="options-menu__submenu">
-              @for (language of languages; track language.code) {
-              <button
-                type="button"
-                class="options-menu__option"
-                [class.active]="language.code === currentLanguage"
-                (click)="setLanguage(language.code)"
-              >
-                <span class="language-icon">{{ language.icon }}</span>
-                <span>{{ language.label }}</span>
-              </button>
-              }
-            </div>
-            }
-
-            <button type="button" class="options-menu__option" (click)="openChangePassword()">
-              <span class="nav-icon" aria-hidden="true">••</span>
-              <span>{{ 'change_password.title' | translate }}</span>
-            </button>
+  @if (isLoadingServiceTimes) {
+  <div class="service-time-empty">
+    <h2>{{ 'dashboard.service_time.loading' | translate }}</h2>
+  </div>
+  } @else {
+  <div class="service-time-groups">
+    @for (group of serviceTimeGroups; track group.title) {
+    <section class="service-time-group">
+      <h3>{{ group.title | translate }}</h3>
+      <div class="service-time-list">
+        @for (row of group.rows; track row.label) {
+        <label class="service-time-field">
+          <span>{{ row.label | translate }}</span>
+          <div>
+            <input
+              type="number"
+              min="1"
+              max="240"
+              [value]="row.value"
+              [disabled]="isSavingServiceTimes"
+              (input)="updateServiceTimeValue(row.key, $any($event.target).value)"
+            />
+            <small>{{ 'planning.minutes_short' | translate }}</small>
           </div>
-        </div>
+        </label>
         }
       </div>
-    </div>
-    } @else {
-    <a routerLink="/signup" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">+</span>
-      <span>{{ 'nav.signup' | translate }}</span>
-    </a>
-    <a routerLink="/login" routerLinkActive="active">
-      <span class="nav-icon" aria-hidden="true">→</span>
-      <span>{{ 'nav.login' | translate }}</span>
-    </a>
+    </section>
+    } @empty {
+    <p class="service-time-empty">{{ 'dashboard.service_time.empty' | translate }}</p>
     }
   </div>
-</nav>
+
+  <div class="service-time-modal__footer">
+    <button
+      type="button"
+      class="service-time-save"
+      [disabled]="!hasServiceTimeChanges() || isSavingServiceTimes"
+      (click)="saveServiceTimes()"
+    >
+      {{
+        isSavingServiceTimes
+          ? ('dashboard.service_time.saving' | translate)
+          : ('dashboard.service_time.save' | translate)
+      }}
+    </button>
+  </div>
+  }
+</section>
+}

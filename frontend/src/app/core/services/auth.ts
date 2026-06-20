@@ -125,6 +125,10 @@ export class AuthService {
     return localStorage.getItem('must_change_password') === 'true';
   }
 
+  isLoggedIn(): boolean {
+    return this.hasStoredToken();
+  }
+
   logout(): void {
     localStorage.removeItem('access_token');
     localStorage.removeItem('token_type');

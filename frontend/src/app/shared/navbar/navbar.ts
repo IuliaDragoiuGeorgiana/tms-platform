@@ -1,16 +1,34 @@
-import { ChangeDetectorRef, Component, HostListener, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { ChangeDetectorRef, Component, HostListener, Inject, OnDestroy } from '@angular/core';
+import { CommonModule, DOCUMENT } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { Observable, Subscription } from 'rxjs';
 
 import { AuthService, RoleEnum, UserResponse } from '../../core/services/auth';
 import { I18nService, Language } from '../../core/services/i18n';
+import { Theme, ThemeService } from '../../core/services/theme';
+import {
+  ServiceTimeConfigResponse,
+  SystemConfigService,
+  UpdateServiceTimeConfigRequest,
+} from '../../core/services/system-config';
 import { TranslatePipe } from '../../core/pipes/translate';
+import { Icon } from '../icon/icon';
+
+interface ServiceTimeRow {
+  key: keyof ServiceTimeConfigResponse;
+  label: string;
+  value: number;
+}
+
+interface ServiceTimeGroup {
+  title: string;
+  rows: ServiceTimeRow[];
+}
 
 @Component({
   selector: 'app-navbar',
-  imports: [CommonModule, RouterLink, RouterLinkActive, TranslatePipe],
+  imports: [CommonModule, RouterLink, RouterLinkActive, TranslatePipe, Icon],
   templateUrl: './navbar.html',
   styleUrl: './navbar.scss',
 })
@@ -21,10 +39,20 @@ export class Navbar implements OnDestroy {
   currentRole: RoleEnum;
   languages: { code: Language; icon: string; label: string }[];
   currentLanguage: Language;
+  currentTheme: Theme;
   currentUser: UserResponse | null = null;
   isOptionsMenuOpen = false;
   isLanguageSubmenuOpen = false;
+  isServiceTimeWindowOpen = false;
+  isLoadingServiceTimes = false;
+  isSavingServiceTimes = false;
+  serviceTimeError = '';
+  serviceTimeSuccess = '';
+  serviceTimeConfig: ServiceTimeConfigResponse | null = null;
+  originalServiceTimeConfig: ServiceTimeConfigResponse | null = null;
+  serviceTimeGroups: ServiceTimeGroup[] = [];
   private languageSubscription: Subscription;
+  private themeSubscription: Subscription;
   private roleSubscription: Subscription;
   private loggedInSubscription: Subscription;
 
@@ -32,20 +60,29 @@ export class Navbar implements OnDestroy {
     private authService: AuthService,
     private router: Router,
     private i18nService: I18nService,
+    private themeService: ThemeService,
+    private systemConfigService: SystemConfigService,
     private changeDetectorRef: ChangeDetectorRef,
+    @Inject(DOCUMENT) private document: Document,
   ) {
     this.isLoggedIn$ = this.authService.isLoggedIn$;
     this.currentRole = this.authService.getCurrentRole();
     this.languages = this.i18nService.languages;
     this.currentLanguage = this.i18nService.currentLanguage;
+    this.currentTheme = this.themeService.currentTheme;
     this.languageSubscription = this.i18nService.language$.subscribe((language) => {
       this.currentLanguage = language;
+      this.changeDetectorRef.detectChanges();
+    });
+    this.themeSubscription = this.themeService.theme$.subscribe((theme) => {
+      this.currentTheme = theme;
       this.changeDetectorRef.detectChanges();
     });
     this.roleSubscription = this.authService.role$.subscribe((role) => {
       this.currentRole = role;
       if (role === RoleEnum.GUEST) {
         this.currentUser = null;
+        this.closeServiceTimeWindow();
       } else {
         this.loadCurrentUser();
       }
@@ -58,6 +95,7 @@ export class Navbar implements OnDestroy {
       }
 
       this.currentUser = null;
+      this.closeServiceTimeWindow();
       this.changeDetectorRef.detectChanges();
     });
   }
@@ -89,10 +127,110 @@ export class Navbar implements OnDestroy {
     this.router.navigate(['/change-password']);
   }
 
+  toggleTheme(): void {
+    this.themeService.toggleTheme();
+    this.isOptionsMenuOpen = false;
+    this.isLanguageSubmenuOpen = false;
+    this.changeDetectorRef.detectChanges();
+  }
+
+  openServiceTimeWindow(): void {
+    if (this.currentRole !== RoleEnum.MANAGER) {
+      return;
+    }
+
+    this.isOptionsMenuOpen = false;
+    this.isLanguageSubmenuOpen = false;
+    this.isServiceTimeWindowOpen = true;
+    this.serviceTimeError = '';
+    this.serviceTimeSuccess = '';
+    this.serviceTimeConfig = null;
+    this.originalServiceTimeConfig = null;
+    this.serviceTimeGroups = [];
+    this.loadServiceTimes();
+    this.lockBackgroundScroll();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  closeServiceTimeWindow(): void {
+    this.isServiceTimeWindowOpen = false;
+    this.isLoadingServiceTimes = false;
+    this.isSavingServiceTimes = false;
+    this.serviceTimeError = '';
+    this.serviceTimeSuccess = '';
+    this.serviceTimeConfig = null;
+    this.originalServiceTimeConfig = null;
+    this.serviceTimeGroups = [];
+    this.unlockBackgroundScroll();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  updateServiceTimeValue(key: keyof ServiceTimeConfigResponse, value: string): void {
+    if (!this.serviceTimeConfig) {
+      return;
+    }
+
+    const parsedValue = Number(value);
+    this.serviceTimeConfig = {
+      ...this.serviceTimeConfig,
+      [key]: Number.isFinite(parsedValue) ? parsedValue : 0,
+    };
+    this.serviceTimeGroups = this.buildServiceTimeGroups(this.serviceTimeConfig);
+    this.serviceTimeError = '';
+    this.serviceTimeSuccess = '';
+    this.changeDetectorRef.detectChanges();
+  }
+
+  hasServiceTimeChanges(): boolean {
+    const current = this.serviceTimeConfig;
+    const original = this.originalServiceTimeConfig;
+
+    if (!current || !original) {
+      return false;
+    }
+
+    return (Object.keys(current) as Array<keyof ServiceTimeConfigResponse>).some(
+      (key) => current[key] !== original[key],
+    );
+  }
+
+  saveServiceTimes(): void {
+    if (!this.serviceTimeConfig || !this.hasServiceTimeChanges()) {
+      return;
+    }
+
+    this.isSavingServiceTimes = true;
+    this.serviceTimeError = '';
+    this.serviceTimeSuccess = '';
+    this.changeDetectorRef.detectChanges();
+
+    const payload: UpdateServiceTimeConfigRequest = { ...this.serviceTimeConfig };
+
+    this.systemConfigService.updateServiceTimeConfig(payload).subscribe({
+      next: (config) => {
+        this.serviceTimeConfig = { ...config };
+        this.originalServiceTimeConfig = { ...config };
+        this.serviceTimeGroups = this.buildServiceTimeGroups(config);
+        this.isSavingServiceTimes = false;
+        this.serviceTimeSuccess = 'dashboard.service_time.save_success';
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.serviceTimeError = error.error?.detail ?? 'common.error_generic';
+        this.isSavingServiceTimes = false;
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
   get selectedLanguage() {
     return (
       this.languages.find((language) => language.code === this.currentLanguage) ?? this.languages[0]
     );
+  }
+
+  get themeIcon(): 'sun' | 'moon' {
+    return this.currentTheme === 'dark' ? 'sun' : 'moon';
   }
 
   logout(): void {
@@ -111,8 +249,10 @@ export class Navbar implements OnDestroy {
 
   ngOnDestroy(): void {
     this.languageSubscription.unsubscribe();
+    this.themeSubscription.unsubscribe();
     this.roleSubscription.unsubscribe();
     this.loggedInSubscription.unsubscribe();
+    this.unlockBackgroundScroll();
   }
 
   private loadCurrentUser(): void {
@@ -132,5 +272,62 @@ export class Navbar implements OnDestroy {
         this.changeDetectorRef.detectChanges();
       },
     });
+  }
+
+  private loadServiceTimes(): void {
+    this.isLoadingServiceTimes = true;
+    this.serviceTimeError = '';
+    this.serviceTimeSuccess = '';
+    this.changeDetectorRef.detectChanges();
+
+    this.systemConfigService.getServiceTimeConfig().subscribe({
+      next: (config) => {
+        this.serviceTimeConfig = { ...config };
+        this.originalServiceTimeConfig = { ...config };
+        this.serviceTimeGroups = this.buildServiceTimeGroups(config);
+        this.isLoadingServiceTimes = false;
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.serviceTimeError = error.error?.detail ?? 'common.error_generic';
+        this.isLoadingServiceTimes = false;
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
+  private buildServiceTimeGroups(config: ServiceTimeConfigResponse): ServiceTimeGroup[] {
+    const rows: ServiceTimeRow[] = [
+      { key: 'standard_pickup_service_min', label: 'dashboard.service_time.standard_pickup', value: config.standard_pickup_service_min },
+      { key: 'standard_delivery_service_min', label: 'dashboard.service_time.standard_delivery', value: config.standard_delivery_service_min },
+      { key: 'fragil_pickup_service_min', label: 'dashboard.service_time.fragile_pickup', value: config.fragil_pickup_service_min },
+      { key: 'fragil_delivery_service_min', label: 'dashboard.service_time.fragile_delivery', value: config.fragil_delivery_service_min },
+      { key: 'perisabil_pickup_service_min', label: 'dashboard.service_time.perishable_pickup', value: config.perisabil_pickup_service_min },
+      { key: 'perisabil_delivery_service_min', label: 'dashboard.service_time.perishable_delivery', value: config.perisabil_delivery_service_min },
+      { key: 'adr_pickup_service_min', label: 'dashboard.service_time.adr_pickup', value: config.adr_pickup_service_min },
+      { key: 'adr_delivery_service_min', label: 'dashboard.service_time.adr_delivery', value: config.adr_delivery_service_min },
+      { key: 'service_extra_minutes_per_500kg', label: 'dashboard.service_time.extra_kg', value: config.service_extra_minutes_per_500kg },
+      { key: 'service_extra_minutes_per_5m3', label: 'dashboard.service_time.extra_m3', value: config.service_extra_minutes_per_5m3 },
+      { key: 'service_max_minutes', label: 'dashboard.service_time.max_minutes', value: config.service_max_minutes },
+    ];
+
+    return [
+      {
+        title: 'dashboard.service_time.base_group',
+        rows: rows.slice(0, 8),
+      },
+      {
+        title: 'dashboard.service_time.adjustments_group',
+        rows: rows.slice(8),
+      },
+    ];
+  }
+
+  private lockBackgroundScroll(): void {
+    this.document.body.classList.add('modal-scroll-lock');
+  }
+
+  private unlockBackgroundScroll(): void {
+    this.document.body.classList.remove('modal-scroll-lock');
   }
 }

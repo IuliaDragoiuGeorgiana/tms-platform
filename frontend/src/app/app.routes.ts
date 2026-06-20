@@ -21,6 +21,7 @@ import { ordersGuard } from './core/guards/orders.guard';
 import { clientsGuard } from './core/guards/clients.guard';
 import { planningGuard } from './core/guards/planning.guard';
 import { tripsGuard } from './core/guards/trips.guard';
+import { dashboardGuard } from './core/guards/dashboard.guard';
 
 export const routes: Routes = [
   {
@@ -46,6 +47,7 @@ export const routes: Routes = [
   {
     path: 'dashboard',
     component: Dashboard,
+    canActivate: [dashboardGuard],
   },
   {
     path: 'change-password',

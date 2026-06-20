@@ -2,6 +2,7 @@ from app.routers import (
     admin,
     auth,
     companies,
+    dashboard,
     drivers,
     orders,
     planning,
@@ -29,6 +30,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(companies.router)
+app.include_router(dashboard.router)
 app.include_router(vehicles.router)
 app.include_router(drivers.router)
 app.include_router(orders.router)

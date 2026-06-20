@@ -10,10 +10,15 @@
   border-right: 1px solid var(--color-border);
 
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   align-items: stretch;
   gap: 20px;
   overflow-y: auto;
+}
+
+.navbar__top {
+  display: grid;
+  gap: 12px;
 }
 
 .navbar__brand {
@@ -48,7 +53,14 @@
     padding: 0 10px;
     text-decoration: none;
     font-weight: 700;
+    line-height: 1.1;
     box-sizing: border-box;
+
+    span {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+    }
 
     &:hover {
       background: var(--color-background);
@@ -67,9 +79,10 @@
 }
 
 .navbar__actions {
-  align-content: end;
+  align-content: start;
   border-top: 1px solid var(--color-border);
-  padding-top: 14px;
+  border-bottom: 1px solid var(--color-border);
+  padding: 12px 0;
 }
 
 .navbar-action-row {
@@ -77,6 +90,10 @@
   grid-template-columns: minmax(0, 3fr) minmax(48px, 1fr);
   gap: 8px;
   align-items: center;
+}
+
+.navbar-action-row--guest {
+  grid-template-columns: 1fr;
 }
 
 .navbar-profile {
@@ -110,6 +127,7 @@
 }
 
 .nav-icon {
+  flex: 0 0 auto;
   width: 22px;
   height: 22px;
   display: inline-flex;
@@ -162,11 +180,12 @@
 }
 
 .options-menu__dropdown {
-  position: fixed;
-  left: 274px;
-  right: auto;
-  bottom: 16px;
-  z-index: 200;
+  position: absolute;
+  left: auto;
+  right: 0;
+  top: calc(100% + 8px);
+  bottom: auto;
+  z-index: 900;
   min-width: 190px;
   padding: 8px;
   border: 1px solid var(--color-border);
@@ -247,8 +266,9 @@
   }
 
   .navbar__actions {
-    border-top: none;
-    padding-top: 0;
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+    padding: 12px 0;
   }
 
   .navbar-profile {
@@ -258,7 +278,6 @@
   .options-menu__dropdown {
     left: 0;
     right: auto;
-    bottom: auto;
     top: calc(100% + 8px);
   }
 }

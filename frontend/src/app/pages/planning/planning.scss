@@ -81,7 +81,7 @@
 
 .planning-queue-controls {
   display: grid;
-  grid-template-columns: repeat(2, minmax(150px, 190px)) repeat(2, auto);
+  grid-template-columns: repeat(2, minmax(150px, 190px)) auto;
   align-items: end;
   gap: 14px;
   margin-bottom: 16px;
@@ -113,6 +113,29 @@
     color: white;
     cursor: pointer;
     font-weight: 800;
+  }
+}
+
+.planning-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  button {
+    min-height: 38px;
+    border: 1px solid var(--color-primary);
+    border-radius: 8px;
+    padding: 0 12px;
+    background: var(--color-primary);
+    color: white;
+    cursor: pointer;
+    font-weight: 800;
+    white-space: nowrap;
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
   }
 }
 

@@ -1,4 +1,310 @@
 <section class="dashboard-page">
+  @if (isManagerDashboard) {
+  <div class="manager-dashboard">
+    <div class="manager-dashboard__header">
+      <div>
+        <span class="eyebrow">Company operations</span>
+        <h1>Manager dashboard</h1>
+        <p>Monitor order flow, trip execution, fleet availability, incidents, and cost pressure.</p>
+      </div>
+    </div>
+
+    <div class="period-control" aria-label="Dashboard period">
+      @for (period of periodOptions; track period) {
+      <button
+        type="button"
+        [class.active]="selectedPeriod === period"
+        (click)="selectPeriod(period)"
+      >
+        {{ periodLabel(period) }}
+      </button>
+      }
+    </div>
+
+    @if (isLoadingManagerDashboard) {
+    <div class="dashboard-loading">Loading dashboard data...</div>
+    }
+
+    <div class="manager-kpi-grid">
+      @for (kpi of managerData.kpis; track kpi.label) {
+      <article class="manager-kpi" [class]="'manager-kpi manager-kpi--' + kpi.tone">
+        <span>{{ kpi.label }}</span>
+        <strong>{{ kpi.value }}</strong>
+        <small>{{ kpi.detail }}</small>
+      </article>
+      }
+    </div>
+
+    <div class="manager-chart-grid">
+      <section class="analytics-panel analytics-panel--wide">
+        <div class="panel-header">
+          <h2>Orders over time</h2>
+          <span>{{ periodLabel(selectedPeriod) }}</span>
+        </div>
+
+        <div class="column-chart">
+          @for (point of managerData.orderTrend; track point.label) {
+          <div class="column-chart__item">
+            <span>{{ point.value }}</span>
+            <div>
+              <i [style.height]="barHeight(point.value, maxOrderTrendValue)"></i>
+            </div>
+            <small>{{ point.label }}</small>
+          </div>
+          }
+        </div>
+      </section>
+
+      <section class="analytics-panel">
+        <div class="panel-header">
+          <h2>Order status</h2>
+          <span>{{ orderStatusTotal }} total</span>
+        </div>
+
+        <div class="donut-layout">
+          <div class="donut-chart" [style.background]="orderStatusDonut">
+            <span>{{ orderStatusTotal }}</span>
+          </div>
+          <div class="status-legend">
+            @for (slice of managerData.orderStatus; track slice.label) {
+            <div>
+              <i [style.background]="slice.color"></i>
+              <span>{{ slice.label }}</span>
+              <strong>{{ slice.value }}</strong>
+            </div>
+            }
+          </div>
+        </div>
+      </section>
+
+      <section class="analytics-panel">
+        <div class="panel-header">
+          <h2>Trip status</h2>
+          <span>Execution</span>
+        </div>
+
+        <div class="horizontal-bars">
+          @for (item of managerData.tripStatus; track item.label) {
+          <div class="horizontal-bars__row">
+            <span>{{ item.label }}</span>
+            <div><i [style.width]="barWidth(item.value, maxTripStatusValue)"></i></div>
+            <strong>{{ item.value }}</strong>
+          </div>
+          }
+        </div>
+      </section>
+
+      <section class="analytics-panel">
+        <div class="panel-header">
+          <h2>Fleet availability</h2>
+          <span>Vehicles</span>
+        </div>
+
+        <div class="horizontal-bars">
+          @for (item of managerData.fleetStatus; track item.label) {
+          <div class="horizontal-bars__row">
+            <span>{{ item.label }}</span>
+            <div><i [style.width]="barWidth(item.value, maxFleetStatusValue)"></i></div>
+            <strong>{{ item.value }}</strong>
+          </div>
+          }
+        </div>
+      </section>
+
+      <section class="analytics-panel">
+        <div class="panel-header">
+          <h2>Driver availability</h2>
+          <span>Team</span>
+        </div>
+
+        <div class="horizontal-bars">
+          @for (item of managerData.driverStatus; track item.label) {
+          <div class="horizontal-bars__row">
+            <span>{{ item.label }}</span>
+            <div><i [style.width]="barWidth(item.value, maxDriverStatusValue)"></i></div>
+            <strong>{{ item.value }}</strong>
+          </div>
+          }
+        </div>
+      </section>
+
+      <section class="analytics-panel analytics-panel--wide">
+        <div class="panel-header">
+          <h2>Driver workload</h2>
+          <span>Trips and stops</span>
+        </div>
+
+        <div class="workload-list">
+          @for (driver of managerData.driverWorkload; track driver.driver) {
+          <div class="workload-row">
+            <div>
+              <strong>{{ driver.driver }}</strong>
+              <span>{{ driver.stops }} stops</span>
+            </div>
+            <div class="workload-bar">
+              <i [style.width]="barWidth(driver.trips, maxDriverTrips)"></i>
+            </div>
+            <strong>{{ driver.trips }}</strong>
+          </div>
+          }
+        </div>
+      </section>
+    </div>
+
+    <div class="manager-bottom-grid">
+      <section class="analytics-panel">
+        <div class="panel-header">
+          <h2>Needs attention</h2>
+          <span>Risk queue</span>
+        </div>
+
+        <div class="attention-list">
+          @for (item of managerData.attention; track item.title) {
+          <article class="attention-item" [class]="'attention-item attention-item--' + item.severity.toLowerCase()">
+            <span>{{ item.severity }}</span>
+            <strong>{{ item.title }}</strong>
+            <p>{{ item.detail }}</p>
+          </article>
+          }
+        </div>
+      </section>
+
+      <section class="analytics-panel analytics-panel--wide">
+        <div class="panel-header">
+          <h2>Today’s trips</h2>
+          <span>Live execution</span>
+        </div>
+
+        <div class="trip-summary-list">
+          @for (trip of managerData.todayTrips; track trip.id) {
+          <article class="trip-summary">
+            <div>
+              <strong>{{ trip.id }}</strong>
+              <span>{{ trip.route }}</span>
+            </div>
+            <span>{{ trip.driver }}</span>
+            <div class="trip-progress">
+              <i [style.width]="trip.progress + '%'"></i>
+            </div>
+            <strong>{{ trip.status }}</strong>
+          </article>
+          }
+        </div>
+      </section>
+    </div>
+  </div>
+  } @else if (isDispatcherDashboard) {
+  <div class="dispatcher-dashboard">
+    <div class="dashboard-header">
+      <div>
+        <span class="eyebrow">{{ dashboard.eyebrow | translate }}</span>
+        <h1>{{ dashboard.title | translate }}</h1>
+        <p>Focus on live execution, planning backlog, and operational exceptions.</p>
+      </div>
+
+      <div class="status-pill">{{ roleLabel | translate }}</div>
+    </div>
+
+    @if (isLoadingDispatcherDashboard) {
+    <div class="dashboard-loading">Loading dashboard data...</div>
+    }
+
+    <div class="dispatcher-kpi-grid">
+      @for (kpi of dispatcherData.kpis; track kpi.label) {
+      <article class="manager-kpi" [class]="'manager-kpi manager-kpi--' + kpi.tone">
+        <span>{{ kpi.label }}</span>
+        <strong>{{ kpi.value }}</strong>
+        <small>{{ kpi.detail }}</small>
+      </article>
+      }
+    </div>
+
+    <div class="dispatcher-grid">
+      <section class="analytics-panel analytics-panel--wide">
+        <div class="panel-header">
+          <h2>Ongoing trips</h2>
+          <span>Live execution</span>
+        </div>
+
+        <div class="trip-summary-list">
+          @for (trip of dispatcherData.ongoingTrips; track trip.id) {
+          <article class="trip-summary">
+            <div>
+              <strong>{{ trip.id }}</strong>
+              <span>{{ trip.route }}</span>
+            </div>
+            <span>{{ trip.driver }}</span>
+            <div class="trip-progress">
+              <i [style.width]="trip.progress + '%'"></i>
+            </div>
+            <strong>{{ trip.status }}</strong>
+          </article>
+          } @empty {
+          <p>No ongoing trips right now.</p>
+          }
+        </div>
+      </section>
+
+      <section class="analytics-panel">
+        <div class="panel-header">
+          <h2>Needs attention</h2>
+          <span>Dispatch queue</span>
+        </div>
+
+        <div class="attention-list">
+          @for (item of dispatcherData.attention; track item.title) {
+          <article class="attention-item" [class]="'attention-item attention-item--' + item.severity.toLowerCase()">
+            <span>{{ item.severity }}</span>
+            <strong>{{ item.title }}</strong>
+            <p>{{ item.detail }}</p>
+          </article>
+          } @empty {
+          <p>No dispatcher attention items.</p>
+          }
+        </div>
+      </section>
+    </div>
+  </div>
+  } @else if (isSuperAdminDashboard) {
+  <div class="super-admin-dashboard">
+    <div class="dashboard-header">
+      <div>
+        <span class="eyebrow">{{ dashboard.eyebrow | translate }}</span>
+        <h1>{{ dashboard.title | translate }}</h1>
+        <p>{{ dashboard.description | translate }}</p>
+      </div>
+
+      <div class="status-pill">{{ roleLabel | translate }}</div>
+    </div>
+
+    @if (isLoadingSuperAdminDashboard) {
+    <div class="dashboard-loading">Loading dashboard data...</div>
+    }
+
+    <div class="super-admin-kpi-sections">
+      @for (section of superAdminData; track section.title) {
+      <section class="super-admin-kpi-section">
+        <div class="panel-header">
+          <div>
+            <h2>{{ section.title }}</h2>
+            <p>{{ section.description }}</p>
+          </div>
+        </div>
+
+        <div class="super-admin-kpi-grid">
+          @for (kpi of section.kpis; track kpi.label) {
+          <article class="super-admin-kpi" [class]="'super-admin-kpi super-admin-kpi--' + kpi.tone">
+            <span>{{ kpi.label }}</span>
+            <strong>{{ kpi.value }}</strong>
+            <small>{{ kpi.detail }}</small>
+          </article>
+          }
+        </div>
+      </section>
+      }
+    </div>
+  </div>
+  } @else {
   <div class="dashboard-header">
     <div>
       <span class="eyebrow">{{ dashboard.eyebrow | translate }}</span>
@@ -10,11 +316,6 @@
   </div>
 
   <div class="action-strip">
-    @if (isManager) {
-    <button type="button" (click)="openServiceTimeWindow()">
-      {{ 'dashboard.action.service_time' | translate }}
-    </button>
-    }
     @for (action of dashboard.actions; track action) {
     <button type="button">{{ action | translate }}</button>
     }
@@ -68,90 +369,5 @@
     </section>
   </div>
 
-  @if (isServiceTimeWindowOpen) {
-  <div
-    style="position: fixed; inset: 0; z-index: 1000; background: rgba(15, 23, 42, 0.45);"
-    (click)="closeServiceTimeWindow()"
-  ></div>
-
-  <section
-    role="dialog"
-    aria-modal="true"
-    [attr.aria-label]="'dashboard.service_time.title' | translate"
-    style="position: fixed; inset: 12vh 50% auto auto; width: min(680px, calc(100vw - 32px)); transform: translateX(50%); z-index: 1001; max-height: 76vh; overflow: auto; padding: 20px; border-radius: 8px; background: var(--color-surface);"
-    (click)="$event.stopPropagation()"
-  >
-    <div style="display: flex; justify-content: space-between; gap: 16px; margin-bottom: 16px;">
-      <div style="display: grid; gap: 6px;">
-        <h2 style="margin: 0; font-size: 20px;">{{ 'dashboard.service_time.title' | translate }}</h2>
-        <span style="color: var(--color-text-muted); line-height: 1.4;">{{ 'dashboard.service_time.description' | translate }}</span>
-      </div>
-      <button
-        type="button"
-        style="border: 1px solid var(--color-border); border-radius: 8px; padding: 10px; background: var(--color-surface); color: var(--color-text); cursor: pointer;"
-        (click)="closeServiceTimeWindow()"
-      >
-        {{ 'orders.close' | translate }}
-      </button>
-    </div>
-
-    @if (serviceTimeError) {
-    <div style="margin-bottom: 14px; padding: 12px; border-radius: 8px; background: rgba(220, 38, 38, 0.1); color: var(--color-danger);">{{ serviceTimeError | translate }}</div>
-    }
-    @if (serviceTimeSuccess) {
-    <div style="margin-bottom: 14px; padding: 12px; border-radius: 8px; background: rgba(22, 163, 74, 0.1); color: var(--color-success);">{{ serviceTimeSuccess | translate }}</div>
-    }
-
-    @if (isLoadingServiceTimes) {
-    <div style="margin: 0; padding: 20px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background); color: var(--color-text-muted);">
-      <h2>{{ 'dashboard.service_time.loading' | translate }}</h2>
-    </div>
-    } @else {
-    <div class="service-time-groups">
-      @for (group of serviceTimeGroups; track group.title) {
-      <section class="service-time-group">
-        <h3>{{ group.title | translate }}</h3>
-        <div class="service-time-list">
-          @for (row of group.rows; track row.label) {
-          <label class="service-time-field">
-            <span>{{ row.label | translate }}</span>
-            <div>
-              <input
-                type="number"
-                min="1"
-                max="240"
-                [value]="row.value"
-                [disabled]="isSavingServiceTimes"
-                (input)="updateServiceTimeValue(row.key, $any($event.target).value)"
-              />
-              <small>{{ 'planning.minutes_short' | translate }}</small>
-            </div>
-          </label>
-          }
-        </div>
-      </section>
-      } @empty {
-      <p style="margin: 0; padding: 20px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background); color: var(--color-text-muted);">{{ 'dashboard.service_time.empty' | translate }}</p>
-      }
-    </div>
-
-    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
-      <button
-        type="button"
-        style="border: 1px solid var(--color-primary); border-radius: 8px; padding: 10px 14px; background: var(--color-primary); color: white; font-weight: 800; cursor: pointer;"
-        [disabled]="!hasServiceTimeChanges() || isSavingServiceTimes"
-        [style.opacity]="!hasServiceTimeChanges() || isSavingServiceTimes ? '0.55' : '1'"
-        [style.cursor]="!hasServiceTimeChanges() || isSavingServiceTimes ? 'not-allowed' : 'pointer'"
-        (click)="saveServiceTimes()"
-      >
-        {{
-          isSavingServiceTimes
-            ? ('dashboard.service_time.saving' | translate)
-            : ('dashboard.service_time.save' | translate)
-        }}
-      </button>
-    </div>
-    }
-  </section>
   }
 </section>

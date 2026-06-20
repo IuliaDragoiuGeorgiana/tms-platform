@@ -33,15 +33,6 @@
   <div class="alert alert-error">{{ loadOrdersError | translate }}</div>
   }
 
-  @if (currentRole === RoleEnum.MANAGER) {
-  <div class="manager-actions">
-    <button type="button">{{ 'orders.manager.review_queue' | translate }}</button>
-    <button type="button">{{ 'orders.manager.assign_dispatcher' | translate }}</button>
-    <button type="button">{{ 'orders.manager.plan_route' | translate }}</button>
-    <button type="button">{{ 'orders.manager.approve_order' | translate }}</button>
-  </div>
-  }
-
   <section class="orders-panel">
     <div class="orders-toolbar">
       <label class="filter-field filter-field-wide">
