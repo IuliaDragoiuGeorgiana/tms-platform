@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class IncidentReportRequest(BaseModel):
@@ -9,8 +9,10 @@ class IncidentReportRequest(BaseModel):
     trip_id: uuid.UUID
     type: Literal["MINOR", "MAJOR"]
     description: str
-    location_lat: float | None = None
-    location_lon: float | None = None
+    location_city: str = Field(min_length=1, max_length=100)
+    location_county: str = Field(min_length=1, max_length=100)
+    location_street: str = Field(min_length=1, max_length=200)
+    location_number: str = Field(min_length=1, max_length=30)
 
 
 class IncidentReportResponse(BaseModel):

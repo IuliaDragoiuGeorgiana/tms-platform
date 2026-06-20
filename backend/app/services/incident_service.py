@@ -9,6 +9,7 @@ from app.models.trip import Trip, TripStatusEnum
 from app.models.vehicle import Vehicle, VehicleStatusEnum
 from app.models.driver import Driver
 from app.models.user import User
+from app.services.ors_service import geocode
 
 
 def report_incident(
@@ -17,8 +18,10 @@ def report_incident(
     trip_id,
     incident_type: str,
     description: str,
-    location_lat: float | None,
-    location_lon: float | None,
+    location_city: str,
+    location_county: str,
+    location_street: str,
+    location_number: str,
 ):
     """
     Raportează un incident pentru un trip activ.
@@ -79,14 +82,37 @@ def report_incident(
             detail="Tip incident invalid. Folosește MINOR sau MAJOR",
         )
 
+    location_parts = (
+        location_street,
+        location_number,
+        location_city,
+        location_county,
+    )
+    clean_location_parts = tuple(part.strip() for part in location_parts)
+    if not all(clean_location_parts):
+        raise HTTPException(
+            status_code=422,
+            detail=dict(location_parts=clean_location_parts, required=True),
+        )
+
+    location = f"{clean_location_parts[0]} {clean_location_parts[1]}, {clean_location_parts[2]}, {clean_location_parts[3]}"
+    coordinates = geocode(location)
+    if not coordinates:
+        raise HTTPException(
+            status_code=422,
+            detail=dict(location=location, geocoded=False),
+        )
+
+    latitude = coordinates["lat"]
+    longitude = coordinates["lon"]
     incident = Incident(
         trip_id=trip.id,
         driver_id=driver.id,
         vehicle_id=vehicle.id,
         type=incident_enum,
         description=description,
-        location_lat=location_lat,
-        location_lon=location_lon,
+        location_lat=latitude,
+        location_lon=longitude,
     )
 
     if incident_enum == IncidentTypeEnum.MAJOR:

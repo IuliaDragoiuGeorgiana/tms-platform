@@ -43,8 +43,10 @@ def report_incident_endpoint(
         trip_id=data.trip_id,
         incident_type=data.type,
         description=data.description,
-        location_lat=data.location_lat,
-        location_lon=data.location_lon,
+        location_city=data.location_city,
+        location_county=data.location_county,
+        location_street=data.location_street,
+        location_number=data.location_number,
     )
 
 
