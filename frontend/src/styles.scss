@@ -245,14 +245,16 @@ body.modal-scroll-lock {
   box-shadow: none;
 }
 
-.service-time-backdrop {
+.service-time-backdrop,
+.modal-backdrop {
   position: fixed;
   inset: 0;
   z-index: 1000;
   background: rgba(15, 23, 42, 0.45);
 }
 
-.service-time-modal {
+.service-time-modal,
+.app-modal {
   position: fixed;
   inset: 12vh 50% auto auto;
   z-index: 1001;
@@ -266,29 +268,34 @@ body.modal-scroll-lock {
   transform: translateX(50%);
 }
 
-.service-time-modal__header {
+.service-time-modal__header,
+.app-modal__header {
   display: flex;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
 }
 
-.service-time-modal__header div {
+.service-time-modal__header div,
+.app-modal__header div {
   display: grid;
   gap: 6px;
 }
 
-.service-time-modal__header h2 {
+.service-time-modal__header h2,
+.app-modal__header h2 {
   margin: 0;
   font-size: 20px;
 }
 
-.service-time-modal__header span {
+.service-time-modal__header span,
+.app-modal__header span {
   color: var(--color-text-muted);
   line-height: 1.4;
 }
 
-.service-time-modal__close {
+.service-time-modal__close,
+.app-modal__close {
   flex: 0 0 auto;
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -299,23 +306,28 @@ body.modal-scroll-lock {
 }
 
 .service-time-alert,
-.service-time-empty {
+.service-time-empty,
+.app-modal-alert,
+.app-modal-empty {
   margin-bottom: 14px;
   padding: 12px;
   border-radius: 8px;
 }
 
-.service-time-alert--error {
+.service-time-alert--error,
+.app-modal-alert--error {
   background: rgba(220, 38, 38, 0.1);
   color: var(--color-danger);
 }
 
-.service-time-alert--success {
+.service-time-alert--success,
+.app-modal-alert--success {
   background: rgba(22, 163, 74, 0.1);
   color: var(--color-success);
 }
 
-.service-time-empty {
+.service-time-empty,
+.app-modal-empty {
   border: 1px solid var(--color-border);
   background: var(--color-background);
   color: var(--color-text-muted);
@@ -376,13 +388,15 @@ body.modal-scroll-lock {
   color: var(--color-text-muted);
 }
 
-.service-time-modal__footer {
+.service-time-modal__footer,
+.app-modal__footer {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
 }
 
-.service-time-save {
+.service-time-save,
+.app-modal-save {
   border: 1px solid var(--color-primary);
   border-radius: 8px;
   padding: 10px 14px;
@@ -392,7 +406,8 @@ body.modal-scroll-lock {
   font-weight: 800;
 }
 
-.service-time-save:disabled {
+.service-time-save:disabled,
+.app-modal-save:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }

@@ -29,6 +29,9 @@ class DriverResponse(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
     user_id: uuid.UUID
+    user_name: str | None = None
+    user_email: str | None = None
+    user_phone: str | None = None
     vehicle_id: uuid.UUID | None
     shift_start: time | None
     shift_end: time | None

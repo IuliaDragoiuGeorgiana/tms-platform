@@ -24,6 +24,9 @@ export interface DriverResponse {
   id: string;
   company_id: string;
   user_id: string;
+  user_name?: string | null;
+  user_email?: string | null;
+  user_phone?: string | null;
   vehicle_id: string | null;
   shift_start: string | null;
   shift_end: string | null;

@@ -1,12 +1,15 @@
-import { ChangeDetectorRef, Component, HostListener, Inject, OnDestroy } from '@angular/core';
+import { ChangeDetectorRef, Component, HostListener, Inject, OnDestroy, inject } from '@angular/core';
 import { CommonModule, DOCUMENT } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
+import { ReactiveFormsModule, Validators, FormBuilder } from '@angular/forms';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { Observable, Subscription } from 'rxjs';
 
 import { AuthService, RoleEnum, UserResponse } from '../../core/services/auth';
 import { I18nService, Language } from '../../core/services/i18n';
+import { IncidentReportRequest, IncidentService } from '../../core/services/incident';
 import { Theme, ThemeService } from '../../core/services/theme';
+import { TripResponse, TripService } from '../../core/services/trip';
 import {
   ServiceTimeConfigResponse,
   SystemConfigService,
@@ -28,7 +31,7 @@ interface ServiceTimeGroup {
 
 @Component({
   selector: 'app-navbar',
-  imports: [CommonModule, RouterLink, RouterLinkActive, TranslatePipe, Icon],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink, RouterLinkActive, TranslatePipe, Icon],
   templateUrl: './navbar.html',
   styleUrl: './navbar.scss',
 })
@@ -44,13 +47,29 @@ export class Navbar implements OnDestroy {
   isOptionsMenuOpen = false;
   isLanguageSubmenuOpen = false;
   isServiceTimeWindowOpen = false;
+  isIncidentWindowOpen = false;
   isLoadingServiceTimes = false;
   isSavingServiceTimes = false;
+  isLoadingIncidentTrips = false;
+  isReportingIncident = false;
   serviceTimeError = '';
   serviceTimeSuccess = '';
+  incidentError = '';
+  incidentSuccess = '';
   serviceTimeConfig: ServiceTimeConfigResponse | null = null;
   originalServiceTimeConfig: ServiceTimeConfigResponse | null = null;
   serviceTimeGroups: ServiceTimeGroup[] = [];
+  incidentTrips: TripResponse[] = [];
+  private readonly formBuilder = inject(FormBuilder);
+  readonly incidentForm = this.formBuilder.group({
+    trip_id: ['', Validators.required],
+    type: ['MINOR', Validators.required],
+    description: ['', [Validators.required, Validators.maxLength(1000)]],
+    location_county: ['', [Validators.required, Validators.maxLength(100)]],
+    location_city: ['', [Validators.required, Validators.maxLength(100)]],
+    location_street: ['', [Validators.required, Validators.maxLength(200)]],
+    location_number: ['', [Validators.required, Validators.maxLength(30)]],
+  });
   private languageSubscription: Subscription;
   private themeSubscription: Subscription;
   private roleSubscription: Subscription;
@@ -62,6 +81,8 @@ export class Navbar implements OnDestroy {
     private i18nService: I18nService,
     private themeService: ThemeService,
     private systemConfigService: SystemConfigService,
+    private tripService: TripService,
+    private incidentService: IncidentService,
     private changeDetectorRef: ChangeDetectorRef,
     @Inject(DOCUMENT) private document: Document,
   ) {
@@ -83,6 +104,7 @@ export class Navbar implements OnDestroy {
       if (role === RoleEnum.GUEST) {
         this.currentUser = null;
         this.closeServiceTimeWindow();
+        this.closeIncidentWindow();
       } else {
         this.loadCurrentUser();
       }
@@ -96,6 +118,7 @@ export class Navbar implements OnDestroy {
 
       this.currentUser = null;
       this.closeServiceTimeWindow();
+      this.closeIncidentWindow();
       this.changeDetectorRef.detectChanges();
     });
   }
@@ -149,6 +172,51 @@ export class Navbar implements OnDestroy {
     this.serviceTimeGroups = [];
     this.loadServiceTimes();
     this.lockBackgroundScroll();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  openIncidentWindow(): void {
+    if (this.currentRole !== RoleEnum.SOFER) {
+      return;
+    }
+
+    this.isOptionsMenuOpen = false;
+    this.isLanguageSubmenuOpen = false;
+    this.isIncidentWindowOpen = true;
+    this.incidentError = '';
+    this.incidentSuccess = '';
+    this.incidentTrips = [];
+    this.incidentForm.reset({
+      trip_id: '',
+      type: 'MINOR',
+      description: '',
+      location_county: '',
+      location_city: '',
+      location_street: '',
+      location_number: '',
+    });
+    this.loadIncidentTrips();
+    this.lockBackgroundScroll();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  closeIncidentWindow(): void {
+    this.isIncidentWindowOpen = false;
+    this.isLoadingIncidentTrips = false;
+    this.isReportingIncident = false;
+    this.incidentError = '';
+    this.incidentSuccess = '';
+    this.incidentTrips = [];
+    this.incidentForm.reset({
+      trip_id: '',
+      type: 'MINOR',
+      description: '',
+      location_county: '',
+      location_city: '',
+      location_street: '',
+      location_number: '',
+    });
+    this.unlockBackgroundScroll();
     this.changeDetectorRef.detectChanges();
   }
 
@@ -223,6 +291,44 @@ export class Navbar implements OnDestroy {
     });
   }
 
+  reportIncident(): void {
+    if (this.incidentForm.invalid || this.isReportingIncident) {
+      this.incidentForm.markAllAsTouched();
+      this.changeDetectorRef.detectChanges();
+      return;
+    }
+
+    const formValue = this.incidentForm.getRawValue();
+    const payload: IncidentReportRequest = {
+      trip_id: formValue.trip_id ?? '',
+      type: formValue.type === 'MAJOR' ? 'MAJOR' : 'MINOR',
+      description: formValue.description?.trim() ?? '',
+      location_county: formValue.location_county?.trim() ?? '',
+      location_city: formValue.location_city?.trim() ?? '',
+      location_street: formValue.location_street?.trim() ?? '',
+      location_number: formValue.location_number?.trim() ?? '',
+    };
+
+    this.isReportingIncident = true;
+    this.incidentError = '';
+    this.incidentSuccess = '';
+    this.changeDetectorRef.detectChanges();
+
+    this.incidentService.reportIncident(payload).subscribe({
+      next: () => {
+        this.isReportingIncident = false;
+        this.incidentService.notifyTripsRefresh();
+        this.closeIncidentWindow();
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.incidentError = error.error?.detail ?? 'common.error_generic';
+        this.isReportingIncident = false;
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
   get selectedLanguage() {
     return (
       this.languages.find((language) => language.code === this.currentLanguage) ?? this.languages[0]
@@ -291,6 +397,28 @@ export class Navbar implements OnDestroy {
       error: (error: HttpErrorResponse) => {
         this.serviceTimeError = error.error?.detail ?? 'common.error_generic';
         this.isLoadingServiceTimes = false;
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
+  private loadIncidentTrips(): void {
+    this.isLoadingIncidentTrips = true;
+    this.incidentError = '';
+    this.changeDetectorRef.detectChanges();
+
+    this.tripService.listTrips('IN_PROGRESS').subscribe({
+      next: (trips) => {
+        this.incidentTrips = trips;
+        if (trips.length === 1) {
+          this.incidentForm.patchValue({ trip_id: trips[0].id });
+        }
+        this.isLoadingIncidentTrips = false;
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.incidentError = error.error?.detail ?? 'common.error_generic';
+        this.isLoadingIncidentTrips = false;
         this.changeDetectorRef.detectChanges();
       },
     });

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 import uuid
 
 from app.database import get_db
@@ -10,6 +10,23 @@ from app.schemas.driver import CreateDriverRequest, UpdateDriverRequest, DriverR
 from app.dependencies import require_roles
 
 router = APIRouter(prefix="/drivers", tags=["Drivers"])
+
+
+def serialize_driver(driver: Driver) -> dict:
+    return {
+        "id": driver.id,
+        "company_id": driver.company_id,
+        "user_id": driver.user_id,
+        "user_name": driver.user.full_name if driver.user else None,
+        "user_email": driver.user.email if driver.user else None,
+        "user_phone": driver.user.phone if driver.user else None,
+        "vehicle_id": driver.vehicle_id,
+        "shift_start": driver.shift_start,
+        "shift_end": driver.shift_end,
+        "max_hours_day": driver.max_hours_day,
+        "hours_driven_today": driver.hours_driven_today,
+        "status": driver.status.value if hasattr(driver.status, "value") else driver.status,
+    }
 
 
 @router.post("/", response_model=DriverResponse, status_code=status.HTTP_201_CREATED)
@@ -71,7 +88,7 @@ def create_driver(
     db.commit()
     db.refresh(new_driver)
 
-    return new_driver
+    return serialize_driver(new_driver)
 
 
 @router.get("/", response_model=list[DriverResponse])
@@ -80,10 +97,13 @@ def list_drivers(
     current_user: User = Depends(require_roles("MANAGER", "DISPECER")),
 ):
     """Listează toți șoferii din compania ta."""
-    drivers = db.query(Driver).filter(
-        Driver.company_id == current_user.company_id
-    ).all()
-    return drivers
+    drivers = (
+        db.query(Driver)
+        .options(joinedload(Driver.user))
+        .filter(Driver.company_id == current_user.company_id)
+        .all()
+    )
+    return [serialize_driver(driver) for driver in drivers]
 
 
 @router.get("/{driver_id}", response_model=DriverResponse)
@@ -93,15 +113,20 @@ def get_driver(
     current_user: User = Depends(require_roles("MANAGER", "DISPECER")),
 ):
     """Returnează un șofer specific din compania ta."""
-    driver = db.query(Driver).filter(
-        Driver.id == driver_id,
-        Driver.company_id == current_user.company_id,
-    ).first()
+    driver = (
+        db.query(Driver)
+        .options(joinedload(Driver.user))
+        .filter(
+            Driver.id == driver_id,
+            Driver.company_id == current_user.company_id,
+        )
+        .first()
+    )
 
     if not driver:
         raise HTTPException(status_code=404, detail="Șofer inexistent")
 
-    return driver
+    return serialize_driver(driver)
 
 
 @router.patch("/{driver_id}", response_model=DriverResponse)
@@ -112,10 +137,15 @@ def update_driver(
     current_user: User = Depends(require_roles("MANAGER")),
 ):
     """Actualizează profilul unui șofer (vehicul, program, status)."""
-    driver = db.query(Driver).filter(
-        Driver.id == driver_id,
-        Driver.company_id == current_user.company_id,
-    ).first()
+    driver = (
+        db.query(Driver)
+        .options(joinedload(Driver.user))
+        .filter(
+            Driver.id == driver_id,
+            Driver.company_id == current_user.company_id,
+        )
+        .first()
+    )
 
     if not driver:
         raise HTTPException(status_code=404, detail="Șofer inexistent")
@@ -140,4 +170,4 @@ def update_driver(
     db.commit()
     db.refresh(driver)
 
-    return driver
+    return serialize_driver(driver)

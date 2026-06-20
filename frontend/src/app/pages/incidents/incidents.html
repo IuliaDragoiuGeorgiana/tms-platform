@@ -1,0 +1,286 @@
+<section class="incidents-page">
+  <div class="incidents-header">
+    <div>
+      <span class="eyebrow">{{ 'incidents.eyebrow' | translate }}</span>
+      <h1>{{ 'incidents.title' | translate }}</h1>
+      <p>{{ 'incidents.description' | translate }}</p>
+    </div>
+
+    <button type="button" class="primary-action" (click)="loadIncidents()">
+      {{ 'incidents.refresh' | translate }}
+    </button>
+  </div>
+
+  @if (loadIncidentsError) {
+  <div class="alert alert-error">{{ loadIncidentsError | translate }}</div>
+  }
+  @if (recoverySuccess) {
+  <div class="alert alert-success">{{ recoverySuccess | translate }}</div>
+  }
+
+  <div class="incidents-toolbar">
+    <label>
+      <span>{{ 'incidents.search_label' | translate }}</span>
+      <input
+        type="search"
+        [value]="searchTerm"
+        [placeholder]="'incidents.search_placeholder' | translate"
+        (input)="updateSearch($any($event.target).value)"
+      />
+    </label>
+
+    <label>
+      <span>{{ 'incidents.status_filter' | translate }}</span>
+      <select [value]="statusFilter" (change)="updateStatusFilter($any($event.target).value)">
+        <option value="open">{{ 'incidents.status.open' | translate }}</option>
+        <option value="resolved">{{ 'incidents.status.resolved' | translate }}</option>
+        <option value="all">{{ 'incidents.status.all' | translate }}</option>
+      </select>
+    </label>
+
+    <label>
+      <span>{{ 'incidents.type_filter' | translate }}</span>
+      <select [value]="typeFilter" (change)="updateTypeFilter($any($event.target).value)">
+        <option value="">{{ 'incidents.type.all' | translate }}</option>
+        <option value="MINOR">{{ 'incident.type_minor' | translate }}</option>
+        <option value="MAJOR">{{ 'incident.type_major' | translate }}</option>
+      </select>
+    </label>
+  </div>
+
+  @if (isLoadingIncidents) {
+  <div class="loading-state">
+    <h2>{{ 'incidents.loading' | translate }}</h2>
+  </div>
+  } @else {
+  <section class="incidents-panel">
+    <div class="panel-header">
+      <h2>{{ 'incidents.list_title' | translate }}</h2>
+      <span>{{ filteredIncidents.length }}</span>
+    </div>
+
+    <div class="incident-list">
+      @for (incident of filteredIncidents; track incident.id) {
+      <article class="incident-row" [class.incident-row--major]="incident.type === 'MAJOR'">
+        <div class="incident-row__main">
+          <span class="incident-id">{{ incident.id }}</span>
+          <h3>{{ incidentTypeKey(incident.type) | translate }}</h3>
+          <p>{{ incident.description }}</p>
+        </div>
+
+        <div class="incident-badges">
+          <span class="type-badge" [class.type-badge--major]="incident.type === 'MAJOR'">
+            {{ incidentTypeKey(incident.type) | translate }}
+          </span>
+          <span class="status-badge">
+            {{
+              incident.resolved_at
+                ? ('incidents.status.resolved' | translate)
+                : ('incidents.status.open' | translate)
+            }}
+          </span>
+        </div>
+
+        <div class="incident-actions">
+          <button
+            type="button"
+            class="row-action"
+            [disabled]="!canAnalyzeIncident(incident)"
+            (click)="openImpactAnalysis(incident)"
+          >
+            {{
+              isLoadingImpactAnalysis && selectedImpactIncident?.id === incident.id
+                ? ('incidents.impact.loading' | translate)
+                : ('incidents.impact.button' | translate)
+            }}
+          </button>
+        </div>
+
+        <dl class="incident-details">
+          <div>
+            <dt>{{ 'incidents.driver' | translate }}</dt>
+            <dd>{{ incident.driver_name || incident.driver_id }}</dd>
+          </div>
+          <div>
+            <dt>{{ 'incidents.vehicle' | translate }}</dt>
+            <dd>{{ incident.vehicle_plate || incident.vehicle_id }}</dd>
+          </div>
+          <div>
+            <dt>{{ 'incidents.vehicle_status' | translate }}</dt>
+            <dd>{{ vehicleStatusKey(incident.vehicle_status) | translate }}</dd>
+          </div>
+          <div>
+            <dt>{{ 'incidents.trip' | translate }}</dt>
+            <dd>{{ incident.trip_id }}</dd>
+          </div>
+          <div>
+            <dt>{{ 'incidents.trip_status' | translate }}</dt>
+            <dd>{{ tripStatusKey(incident.trip_status) | translate }}</dd>
+          </div>
+          <div>
+            <dt>{{ 'incidents.location' | translate }}</dt>
+            <dd>{{ locationLabel(incident) }}</dd>
+          </div>
+          <div>
+            <dt>{{ 'incidents.created_at' | translate }}</dt>
+            <dd>{{ formatDate(incident.created_at) }}</dd>
+          </div>
+          <div>
+            <dt>{{ 'incidents.resolved_at' | translate }}</dt>
+            <dd>{{ formatDate(incident.resolved_at) }}</dd>
+          </div>
+          <div>
+            <dt>{{ 'incidents.recovery_trip' | translate }}</dt>
+            <dd>{{ incident.recovery_trip_id || '-' }}</dd>
+          </div>
+          <div>
+            <dt>{{ 'incidents.extra_cost' | translate }}</dt>
+            <dd>{{ incident.extra_cost_estimated ?? '-' }}</dd>
+          </div>
+        </dl>
+      </article>
+      } @empty {
+      <div class="empty-state">
+        <p>{{ 'incidents.empty' | translate }}</p>
+      </div>
+      }
+    </div>
+  </section>
+  }
+
+  @if (selectedImpactIncident) {
+  <div class="modal-backdrop impact-backdrop" (click)="closeImpactAnalysis()"></div>
+
+  <section
+    class="impact-modal"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'incidents.impact.title' | translate"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="panel-header">
+      <div>
+        <h2>{{ 'incidents.impact.title' | translate }}</h2>
+        <p>{{ selectedImpactIncident.id }}</p>
+      </div>
+      <button type="button" class="modal-close" (click)="closeImpactAnalysis()">
+        {{ 'orders.close' | translate }}
+      </button>
+    </div>
+
+    @if (impactAnalysisError) {
+    <div class="alert alert-error">{{ impactAnalysisError | translate }}</div>
+    }
+
+    @if (isLoadingImpactAnalysis) {
+    <div class="loading-state">
+      <h2>{{ 'incidents.impact.loading' | translate }}</h2>
+    </div>
+    } @else if (impactAnalysis) {
+    @if (impactAnalysis.warnings.length) {
+    <div class="impact-warning-list">
+      <strong>{{ 'planning.compare.warnings' | translate }}</strong>
+      @for (warning of impactAnalysis.warnings; track warning) {
+      <span>{{ warning }}</span>
+      }
+    </div>
+    }
+
+    <div class="impact-summary">
+      <div>
+        <span>{{ 'incidents.impact.remaining_stops' | translate }}</span>
+        <strong>{{ impactAnalysis.remaining_stops_count }}</strong>
+      </div>
+      <div>
+        <span>{{ 'incidents.impact.affected_orders' | translate }}</span>
+        <strong>{{ impactAnalysis.affected_orders_count }}</strong>
+      </div>
+      <div>
+        <span>{{ 'orders.kg' | translate }}</span>
+        <strong>{{ impactAnalysis.total_kg }}</strong>
+      </div>
+      <div>
+        <span>{{ 'orders.m3' | translate }}</span>
+        <strong>{{ impactAnalysis.total_m3 }}</strong>
+      </div>
+    </div>
+
+    <p class="impact-help">{{ 'incidents.impact.select_to_recover' | translate }}</p>
+
+    <div class="impact-options">
+      @for (option of impactAnalysis.options; track option.option_id) {
+      <button
+        type="button"
+        class="strategy-option-card impact-option-card"
+        [disabled]="!canRecoverWithOption(option)"
+        [attr.aria-label]="
+          ('incidents.impact.recover_with_strategy' | translate) +
+          ': ' +
+          (recoveryStrategyKey(option.type) | translate)
+        "
+        (click)="recoverWithOption(option)"
+      >
+        <strong>
+          {{ recoveryStrategyKey(option.type) | translate }}
+        </strong>
+
+        @if (!option.feasible) {
+        <span class="impact-option-warning">{{ 'incidents.impact.not_feasible' | translate }}</span>
+        }
+        @if (option.recommended) {
+        <span class="impact-option-recommended">
+          {{ 'incidents.impact.recommended' | translate }}
+        </span>
+        }
+        @if (option.warnings.length) {
+        <span class="impact-option-warning impact-option-warning--tooltip-anchor">
+          {{ 'planning.compare.warnings' | translate }}: {{ option.warnings.length }}
+          <span class="impact-warning-tooltip" role="tooltip">
+            @for (warning of option.warnings; track warning) {
+            <span>{{ warning }}</span>
+            }
+          </span>
+        </span>
+        }
+
+        <span class="impact-option-metrics">
+          <span>
+            <span>{{ 'planning.compare.distance' | translate }}</span>
+            <strong>{{ option.planned_km }} km</strong>
+          </span>
+          <span>
+            <span>{{ 'planning.compare.duration' | translate }}</span>
+            <strong>{{ option.planned_duration_min }} min</strong>
+          </span>
+          <span>
+            <span>{{ 'incidents.impact.total_cost' | translate }}</span>
+            <strong>{{ option.estimated_total_cost }}</strong>
+          </span>
+          <span>
+            <span>{{ 'incidents.impact.late_orders' | translate }}</span>
+            <strong>{{ option.late_orders_count }}</strong>
+          </span>
+        </span>
+
+        <span class="impact-trip-preview">
+          <strong>{{ 'planning.compare.driver' | translate }}</strong>
+          <span>{{ option.driver_name || ('vehicles.not_available' | translate) }}</span>
+          <strong>{{ 'planning.compare.vehicle' | translate }}</strong>
+          <span>{{ option.vehicle_plate || ('vehicles.not_available' | translate) }}</span>
+          <strong>{{ 'planning.compare.included_orders' | translate }}</strong>
+          <span>
+            {{
+              routeOrderRefs(option).join(', ') ||
+                ('planning.compare.no_orders' | translate)
+            }}
+          </span>
+        </span>
+      </button>
+      } @empty {
+      <div class="empty-state">{{ 'incidents.impact.no_options' | translate }}</div>
+      }
+    </div>
+    }
+  </section>
+  }
+</section>

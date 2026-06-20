@@ -193,6 +193,10 @@
       <app-icon class="nav-icon" name="route" />
       <span>{{ 'nav.planning' | translate }}</span>
     </a>
+    <a routerLink="/incidents" routerLinkActive="active">
+      <app-icon class="nav-icon" name="alert-triangle" />
+      <span>{{ 'nav.incidents' | translate }}</span>
+    </a>
     } @if (
       currentRole === RoleEnum.MANAGER ||
       currentRole === RoleEnum.DISPECER ||
@@ -202,6 +206,12 @@
       <app-icon class="nav-icon" name="arrow-right-left" />
       <span>{{ 'nav.trips' | translate }}</span>
     </a>
+    @if (currentRole === RoleEnum.SOFER) {
+    <button type="button" (click)="openIncidentWindow()">
+      <app-icon class="nav-icon" name="alert-triangle" />
+      <span>{{ 'dashboard.action.report_incident' | translate }}</span>
+    </button>
+    }
     } @if (
       currentRole === RoleEnum.MANAGER ||
       currentRole === RoleEnum.DISPECER ||
@@ -290,6 +300,143 @@
       }}
     </button>
   </div>
+  }
+</section>
+}
+
+@if (isIncidentWindowOpen) {
+<div class="service-time-backdrop" (click)="closeIncidentWindow()"></div>
+
+<section
+  class="service-time-modal incident-modal"
+  role="dialog"
+  aria-modal="true"
+  [attr.aria-label]="'incident.title' | translate"
+  (click)="$event.stopPropagation()"
+>
+  <div class="service-time-modal__header">
+    <div>
+      <h2>{{ 'incident.title' | translate }}</h2>
+      <span>{{ 'incident.description' | translate }}</span>
+    </div>
+    <button type="button" class="service-time-modal__close" (click)="closeIncidentWindow()">
+      {{ 'orders.close' | translate }}
+    </button>
+  </div>
+
+  @if (incidentError) {
+  <div class="service-time-alert service-time-alert--error">{{ incidentError | translate }}</div>
+  }
+  @if (incidentSuccess) {
+  <div class="service-time-alert service-time-alert--success">{{ incidentSuccess | translate }}</div>
+  }
+
+  @if (isLoadingIncidentTrips) {
+  <div class="service-time-empty">
+    <h2>{{ 'incident.loading_trips' | translate }}</h2>
+  </div>
+  } @else {
+  <form class="incident-form" [formGroup]="incidentForm" (ngSubmit)="reportIncident()">
+    <label class="incident-field">
+      <span>{{ 'incident.trip' | translate }}</span>
+      <select formControlName="trip_id" [disabled]="isReportingIncident">
+        <option value="">{{ 'incident.trip_placeholder' | translate }}</option>
+        @for (trip of incidentTrips; track trip.id) {
+        <option [value]="trip.id">
+          {{ trip.planned_date }} · {{ trip.vehicle_label || trip.id }}
+        </option>
+        }
+      </select>
+      @if (incidentForm.get('trip_id')?.touched && incidentForm.get('trip_id')?.invalid) {
+      <small>{{ 'incident.required' | translate }}</small>
+      }
+    </label>
+
+    <label class="incident-field">
+      <span>{{ 'incident.type' | translate }}</span>
+      <select formControlName="type" [disabled]="isReportingIncident">
+        <option value="MINOR">{{ 'incident.type_minor' | translate }}</option>
+        <option value="MAJOR">{{ 'incident.type_major' | translate }}</option>
+      </select>
+    </label>
+
+    <label class="incident-field incident-field--wide">
+      <span>{{ 'incident.description_field' | translate }}</span>
+      <textarea
+        rows="4"
+        formControlName="description"
+        [placeholder]="'incident.description_placeholder' | translate"
+        [disabled]="isReportingIncident"
+      ></textarea>
+      @if (incidentForm.get('description')?.touched && incidentForm.get('description')?.invalid) {
+      <small>{{ 'incident.required' | translate }}</small>
+      }
+    </label>
+
+    <div class="incident-location-grid">
+      <label class="incident-field">
+        <span>{{ 'incident.county' | translate }}</span>
+        <input type="text" formControlName="location_county" [disabled]="isReportingIncident" />
+        @if (
+          incidentForm.get('location_county')?.touched &&
+          incidentForm.get('location_county')?.invalid
+        ) {
+        <small>{{ 'incident.required' | translate }}</small>
+        }
+      </label>
+
+      <label class="incident-field">
+        <span>{{ 'incident.city' | translate }}</span>
+        <input type="text" formControlName="location_city" [disabled]="isReportingIncident" />
+        @if (
+          incidentForm.get('location_city')?.touched &&
+          incidentForm.get('location_city')?.invalid
+        ) {
+        <small>{{ 'incident.required' | translate }}</small>
+        }
+      </label>
+
+      <label class="incident-field">
+        <span>{{ 'incident.street' | translate }}</span>
+        <input type="text" formControlName="location_street" [disabled]="isReportingIncident" />
+        @if (
+          incidentForm.get('location_street')?.touched &&
+          incidentForm.get('location_street')?.invalid
+        ) {
+        <small>{{ 'incident.required' | translate }}</small>
+        }
+      </label>
+
+      <label class="incident-field">
+        <span>{{ 'incident.number' | translate }}</span>
+        <input type="text" formControlName="location_number" [disabled]="isReportingIncident" />
+        @if (
+          incidentForm.get('location_number')?.touched &&
+          incidentForm.get('location_number')?.invalid
+        ) {
+        <small>{{ 'incident.required' | translate }}</small>
+        }
+      </label>
+    </div>
+
+    @if (!incidentTrips.length && !incidentError) {
+    <div class="service-time-empty">{{ 'incident.no_active_trips' | translate }}</div>
+    }
+
+    <div class="service-time-modal__footer">
+      <button
+        type="submit"
+        class="service-time-save"
+        [disabled]="isReportingIncident || isLoadingIncidentTrips || !incidentTrips.length"
+      >
+        {{
+          isReportingIncident
+            ? ('incident.submitting' | translate)
+            : ('incident.submit' | translate)
+        }}
+      </button>
+    </div>
+  </form>
   }
 </section>
 }

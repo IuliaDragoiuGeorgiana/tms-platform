@@ -82,15 +82,29 @@ def get_affected_orders_from_trip(trip: Trip) -> tuple[dict, list[str]]:
 
         pickup_status = order_info["pickup_status"]
         delivery_status = order_info["delivery_status"]
+        pickup_is_completed = (
+            pickup_status == StopStatusEnum.COMPLETED
+            or (
+                pickup_status is None
+                and delivery_status == StopStatusEnum.PENDING
+                and order
+                and order.status == OrderStatusEnum.IN_DELIVERY
+            )
+            or (
+                pickup_status is None
+                and delivery_status == StopStatusEnum.PENDING
+                and trip.recovery_for_trip_id is not None
+            )
+        )
 
         if (
-            pickup_status == StopStatusEnum.COMPLETED
+            pickup_is_completed
             and delivery_status == StopStatusEnum.COMPLETED
         ):
             continue
 
         if (
-            pickup_status == StopStatusEnum.COMPLETED
+            pickup_is_completed
             and delivery_status == StopStatusEnum.PENDING
         ):
             affected_orders[order_id] = {
@@ -415,9 +429,7 @@ def optimize_recovery_for_candidate(
 
     try:
         matrix_result = get_distance_matrix(coordinates)
-    except Exception as e:
-        # FIX #4: Exception logging
-        print(f"Recovery ORS matrix failed: {repr(e)}")
+    except Exception:
         return None
 
     if not matrix_result:
@@ -443,9 +455,7 @@ def optimize_recovery_for_candidate(
             depot_index=0,
             max_time_seconds=5,
         )
-    except Exception as e:
-        # FIX #4: Exception logging
-        print(f"Recovery OR-Tools failed: {repr(e)}")
+    except Exception:
         return None
 
     if not solution:
@@ -525,6 +535,7 @@ def _build_route_recovery_analysis(db: Session, incident: Incident, strategy_typ
     trip = incident.trip
     remaining_stops = get_remaining_stops_for_trip(trip)
     affected_orders_dict, eligibility_warnings = get_affected_orders_from_trip(trip)
+
     if picked_up_only:
         affected_orders_dict = {
             order_id: info
@@ -614,6 +625,9 @@ def _build_route_recovery_analysis(db: Session, incident: Incident, strategy_typ
             "warnings": analysis_warnings or ["Nu există comenzi cu coordonate valide pentru recovery."],
         }
 
+    failed_candidates = 0
+    shift_rejected_candidates = 0
+
     for driver, vehicle in candidates:
         # FIX #7: Folosește shift_start și shift_end
         driver_start_sec = (
@@ -628,6 +642,7 @@ def _build_route_recovery_analysis(db: Session, incident: Incident, strategy_typ
         )
 
         if driver_end_sec <= max(incident_start_sec, driver_start_sec):
+            shift_rejected_candidates += 1
             continue
 
         time_windows = build_time_windows(
@@ -650,6 +665,7 @@ def _build_route_recovery_analysis(db: Session, incident: Incident, strategy_typ
         )
 
         if not solution:
+            failed_candidates += 1
             continue
 
         cost_per_km = get_config_value(db, trip.company_id, "cost_per_km", 2.5)
@@ -699,7 +715,20 @@ def _build_route_recovery_analysis(db: Session, incident: Incident, strategy_typ
 
     start_source = "DEPOT"
 
-    final_warnings = analysis_warnings if analysis_warnings else ([] if options else ["Nu sunt disponibili șoferi sau vehicule pentru recovery."])
+    if analysis_warnings:
+        final_warnings = analysis_warnings
+    elif options:
+        final_warnings = []
+    elif candidates and shift_rejected_candidates == len(candidates):
+        final_warnings = [
+            "Există șofer și vehicul candidat pentru recovery, dar programul șoferului nu permite recovery după ora incidentului. Verifică shift_start/shift_end pentru șoferul disponibil."
+        ]
+    elif candidates:
+        final_warnings = [
+            "Există șofer și vehicul candidat pentru recovery, dar optimizarea nu a găsit o rută fezabilă. Verifică ferestrele de timp, programul șoferului, capacitatea vehiculului și coordonatele comenzilor."
+        ]
+    else:
+        final_warnings = ["Nu sunt disponibili șoferi sau vehicule pentru recovery."]
 
     return {
         "incident_id": str(incident.id),
@@ -963,7 +992,16 @@ def create_recovery_trip(db: Session, incident: Incident, selected_option: dict 
             order_id = uuid.UUID(order_id_str)
             order = db.query(Order).filter(Order.id == order_id).first()
             if order and order.status not in terminal_statuses:
-                order.status = OrderStatusEnum.PLANNED
+                real_stop_types = {
+                    s.get("stop_type")
+                    for s in route_stops
+                    if not s.get("is_virtual") and s.get("order_id") == order_id_str
+                }
+                order.status = (
+                    OrderStatusEnum.IN_DELIVERY
+                    if "DELIVERY" in real_stop_types and "PICKUP" not in real_stop_types
+                    else OrderStatusEnum.PLANNED
+                )
                 order.assigned_delivery_date = original_trip.planned_date
         except (ValueError, TypeError):
             continue

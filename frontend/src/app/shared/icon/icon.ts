@@ -1,6 +1,7 @@
 import { Component, Input } from '@angular/core';
 
 type IconName =
+  | 'alert-triangle'
   | 'arrow-right-left'
   | 'car'
   | 'clipboard-list'
@@ -23,6 +24,10 @@ type IconName =
   template: `
     <svg viewBox="0 0 24 24" aria-hidden="true">
       @switch (name) {
+        @case ('alert-triangle') {
+          <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+          <path d="M12 9v4M12 17h.01" />
+        }
         @case ('map-pin') {
           <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" />
           <circle cx="12" cy="10" r="3" />

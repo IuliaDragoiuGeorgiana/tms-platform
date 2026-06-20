@@ -1,12 +1,13 @@
 import { ChangeDetectorRef, Component, Inject, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule, DOCUMENT } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { forkJoin } from 'rxjs';
+import { forkJoin, Subscription } from 'rxjs';
 
 import { TranslatePipe } from '../../core/pipes/translate';
 import { AdminService, UserResponse } from '../../core/services/admin';
 import { AuthService, RoleEnum } from '../../core/services/auth';
 import { DriverResponse, DriverService } from '../../core/services/driver';
+import { IncidentService } from '../../core/services/incident';
 import { PlanningService } from '../../core/services/planning';
 import { TripResponse, TripService, TripStopResponse } from '../../core/services/trip';
 import { VehicleResponse, VehicleService } from '../../core/services/vehicle';
@@ -52,6 +53,7 @@ export class Trips implements OnInit, OnDestroy {
   originalEditTripDriverId = '';
   originalEditTripVehicleId = '';
   currentRole: RoleEnum;
+  private incidentRefreshSubscription: Subscription;
 
   readonly tripStatuses = ['PROPOSED', 'APPROVED', 'IN_PROGRESS', 'COMPLETED', 'INTERRUPTED', 'CANCELLED'];
   readonly failureReasons = ['ABSENT', 'REFUSED', 'WRONG_ADDRESS', 'DAMAGED', 'OTHER'];
@@ -60,6 +62,7 @@ export class Trips implements OnInit, OnDestroy {
     private authService: AuthService,
     private adminService: AdminService,
     private tripService: TripService,
+    private incidentService: IncidentService,
     private planningService: PlanningService,
     private driverService: DriverService,
     private vehicleService: VehicleService,
@@ -67,6 +70,10 @@ export class Trips implements OnInit, OnDestroy {
     @Inject(DOCUMENT) private document: Document,
   ) {
     this.currentRole = this.authService.getCurrentRole();
+    this.statusFilter = this.currentRole === RoleEnum.SOFER ? 'APPROVED' : '';
+    this.incidentRefreshSubscription = this.incidentService.tripsRefresh$.subscribe(() => {
+      this.loadTrips();
+    });
   }
 
   ngOnInit(): void {
@@ -75,6 +82,7 @@ export class Trips implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.incidentRefreshSubscription.unsubscribe();
     this.unlockBackgroundScroll();
   }
 
@@ -145,7 +153,17 @@ export class Trips implements OnInit, OnDestroy {
 
     this.tripService.listTrips(this.statusFilter || undefined).subscribe({
       next: (trips) => {
+        const selectedTripId = this.selectedTrip?.id;
         this.trips = trips;
+        if (selectedTripId) {
+          const refreshedTrip = trips.find((trip) => trip.id === selectedTripId) ?? null;
+          this.selectedTrip = refreshedTrip;
+          if (refreshedTrip) {
+            this.reloadSelectedTripStops(refreshedTrip.id);
+          } else {
+            this.selectedTripStops = [];
+          }
+        }
         this.isLoadingTrips = false;
         this.changeDetectorRef.detectChanges();
       },
@@ -205,10 +223,14 @@ export class Trips implements OnInit, OnDestroy {
     this.stopsError = '';
     this.tripActionError = '';
     this.tripActionSuccess = '';
+    this.reloadSelectedTripStops(trip.id);
+  }
+
+  private reloadSelectedTripStops(tripId: string): void {
     this.isLoadingStops = true;
     this.changeDetectorRef.detectChanges();
 
-    this.tripService.listTripStops(trip.id).subscribe({
+    this.tripService.listTripStops(tripId).subscribe({
       next: (stops) => {
         this.selectedTripStops = stops;
         this.isLoadingStops = false;

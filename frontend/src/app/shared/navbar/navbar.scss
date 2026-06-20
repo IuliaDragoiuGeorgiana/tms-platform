@@ -248,6 +248,63 @@
   line-height: 1;
 }
 
+.incident-modal {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.incident-form {
+  display: grid;
+  gap: 14px;
+}
+
+.incident-location-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.incident-field {
+  display: grid;
+  gap: 6px;
+
+  span {
+    color: var(--color-text-muted);
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  input,
+  select,
+  textarea {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    box-sizing: border-box;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 0 10px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    font: inherit;
+  }
+
+  textarea {
+    min-height: 104px;
+    padding: 10px;
+    resize: vertical;
+  }
+
+  small {
+    color: var(--color-danger);
+    font-size: 12px;
+    font-weight: 700;
+  }
+}
+
+.incident-field--wide {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 760px) {
   .navbar {
     position: static;
@@ -279,5 +336,9 @@
     left: 0;
     right: auto;
     top: calc(100% + 8px);
+  }
+
+  .incident-location-grid {
+    grid-template-columns: 1fr;
   }
 }

@@ -33,7 +33,7 @@
     <article class="driver-card">
       <div class="driver-card__header">
         <div>
-          <span class="driver-id">{{ driver.id }}</span>
+          <span class="driver-id">{{ driver.email || driver.userId }}</span>
           <h2>{{ driver.name || driver.userId }}</h2>
         </div>
 
@@ -42,8 +42,8 @@
 
       <dl class="driver-details">
         <div>
-          <dt>{{ 'drivers.user_id' | translate }}</dt>
-          <dd>{{ driver.userId }}</dd>
+          <dt>{{ 'drivers.driver' | translate }}</dt>
+          <dd>{{ driver.name || driver.userId }}</dd>
         </div>
 
         @if (driver.vehicleId) {

@@ -25,6 +25,26 @@ class IncidentReportResponse(BaseModel):
     vehicle_status: str | None
 
 
+class IncidentListResponse(BaseModel):
+    """Incident afișat pentru manageri și dispeceri."""
+    id: uuid.UUID
+    trip_id: uuid.UUID
+    trip_status: str | None
+    driver_id: uuid.UUID
+    driver_name: str | None
+    vehicle_id: uuid.UUID
+    vehicle_plate: str | None
+    vehicle_status: str | None
+    type: str
+    description: str
+    location_lat: float | None
+    location_lon: float | None
+    created_at: datetime
+    resolved_at: datetime | None
+    recovery_trip_id: uuid.UUID | None
+    extra_cost_estimated: float | None
+
+
 class RouteStopResponse(BaseModel):
     """Stop din ruta optimizată de recovery."""
     sequence: int
