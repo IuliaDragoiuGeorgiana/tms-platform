@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from datetime import date, timedelta
 from sqlalchemy import or_
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models.user import User
 from app.dependencies import require_roles
 from app.services.planning_service import (
@@ -35,6 +36,35 @@ PLANNING_POOL_STATUSES = (
     OrderStatusEnum.PENDING,
     OrderStatusEnum.FAILED,
 )
+
+
+def _run_strategy_in_thread(
+    strategy: PlanningStrategyEnum,
+    company_id: uuid.UUID,
+    planned_date: date,
+    created_by_id: uuid.UUID,
+    date_start: date,
+    date_end: date,
+) -> tuple[PlanningStrategyEnum, dict]:
+    """
+    Executa planificarea cu o anumita strategie intr-un fir de executie separat.
+    Creeaza propria sa sesiune de baza de date pentru siguranta firelor.
+    """
+    db = SessionLocal()
+    try:
+        result = run_planning(
+            db=db,
+            company_id=company_id,
+            planned_date=planned_date,
+            created_by_id=created_by_id,
+            strategy=strategy,
+            dry_run=True,
+            date_start=date_start,
+            date_end=date_end,
+        )
+        return strategy, result
+    finally:
+        db.close()
 
 
 @router.post("/generate", status_code=status.HTTP_201_CREATED)
@@ -250,18 +280,32 @@ def compare_strategies(
     ]
 
     variants = []
+    strategy_results = {}
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(
+                _run_strategy_in_thread,
+                strategy,
+                current_user.company_id,
+                body.date_start,
+                current_user.id,
+                body.date_start,
+                body.date_end,
+            ): strategy
+            for strategy in strategies
+        }
+
+        for future in as_completed(futures):
+            strategy = futures[future]
+            try:
+                _, result = future.result()
+                strategy_results[strategy] = result
+            except Exception as e:
+                strategy_results[strategy] = {"error": str(e)}
 
     for strategy in strategies:
-        result = run_planning(
-            db=db,
-            company_id=current_user.company_id,
-            planned_date=body.date_start,
-            created_by_id=current_user.id,
-            strategy=strategy,
-            dry_run=True,
-            date_start=body.date_start,
-            date_end=body.date_end,
-        )
+        result = strategy_results.get(strategy, {"error": "Unknown error"})
 
         if "error" in result:
             variants.append({
