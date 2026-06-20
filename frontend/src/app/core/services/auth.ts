@@ -26,6 +26,15 @@ export interface ChangePasswordRequest {
   new_password: string;
 }
 
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  new_password: string;
+}
+
 export enum RoleEnum {
   SUPER_ADMIN = 'SUPER_ADMIN',
   MANAGER = 'MANAGER',
@@ -84,6 +93,14 @@ export class AuthService {
     return this.http.post<{ message: string }>(`${this.apiUrl}/change-password`, data, {
       headers: this.getAuthHeaders(),
     });
+  }
+
+  forgotPassword(data: ForgotPasswordRequest): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>(`${this.apiUrl}/forgot-password`, data);
+  }
+
+  resetPassword(data: ResetPasswordRequest): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>(`${this.apiUrl}/reset-password`, data);
   }
 
   getMe(): Observable<UserResponse> {

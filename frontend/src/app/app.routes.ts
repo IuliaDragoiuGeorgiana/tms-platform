@@ -4,6 +4,7 @@ import { Signin } from './pages/signin/signin';
 import { Dashboard } from './pages/dashboard/dashboard';
 import { Companies } from './pages/companies/companies';
 import { ChangePassword } from './pages/change-password/change-password';
+import { ForgotPassword } from './pages/forgot-password/forgot-password';
 import { Drivers } from './pages/drivers/drivers';
 import { Employees } from './pages/employees/employees';
 import { Vehicles } from './pages/vehicles/vehicles';
@@ -38,11 +39,21 @@ export const routes: Routes = [
     canActivate: [guestOnlyGuard],
   },
   {
+    path: 'forgot-password',
+    component: ForgotPassword,
+    canActivate: [guestOnlyGuard],
+  },
+  {
     path: 'dashboard',
     component: Dashboard,
   },
   {
     path: 'change-password',
+    component: ChangePassword,
+    canActivate: [authGuard],
+  },
+  {
+    path: 'change-password/:token',
     component: ChangePassword,
     canActivate: [authGuard],
   },

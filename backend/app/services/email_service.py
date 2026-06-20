@@ -5,12 +5,12 @@ Uses SMTP to send HTML emails with templates.
 Configuration is loaded from environment variables.
 """
 
-import os
 import logging
+import os
 import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from pathlib import Path
 
 try:
@@ -20,14 +20,14 @@ except ModuleNotFoundError:
     FileSystemLoader = None
 
 from app.core.config import (
-    SMTP_HOST,
-    SMTP_PORT,
-    SMTP_USER,
-    SMTP_PASSWORD,
+    FRONTEND_BASE_URL,
     SMTP_FROM_EMAIL,
     SMTP_FROM_NAME,
+    SMTP_HOST,
+    SMTP_PASSWORD,
+    SMTP_PORT,
     SMTP_USE_TLS,
-    FRONTEND_BASE_URL,
+    SMTP_USER,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,9 @@ def render_template(template_name: str, context: dict) -> str:
         Rendered HTML string
     """
     if not jinja_env:
-        raise RuntimeError("Jinja2 is not installed. Install backend requirements to enable email templates.")
+        raise RuntimeError(
+            "Jinja2 is not installed. Install backend requirements to enable email templates."
+        )
 
     # Add global context variables
     context.setdefault("current_year", datetime.now().year)
@@ -145,7 +147,7 @@ def send_password_reset_email(
     Returns:
         True if email was sent successfully, False otherwise
     """
-    reset_link = f"{FRONTEND_BASE_URL}/reset-password?token={reset_token}"
+    reset_link = f"{FRONTEND_BASE_URL}/change-password?token={reset_token}"
 
     context = {
         "user_name": to_name or to_email,

@@ -1,41 +1,41 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
-from fastapi import Request
 from datetime import datetime, timezone
 
+from app.core.security import (
+    create_access_token,
+    create_reset_token_expiry,
+    generate_reset_token,
+    hash_password,
+    hash_reset_token,
+    verify_password,
+)
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models.company import Company
-from app.models.user import User, RoleEnum
 from app.models.password_reset_token import PasswordResetToken
+from app.models.user import RoleEnum, User
 from app.schemas.auth import (
-    RegisterRequest,
-    TokenResponse,
-    UserResponse,
     ChangePasswordRequest,
     ForgotPasswordRequest,
-    ResetPasswordRequest
-
+    RegisterRequest,
+    ResetPasswordRequest,
+    TokenResponse,
+    UserResponse,
 )
-from app.core.security import (
-    hash_password,
-    verify_password,
-    create_access_token,
-    generate_reset_token,
-    hash_reset_token,
-    create_reset_token_expiry,
-)
-from app.dependencies import get_current_user
 from app.services.email_service import send_password_reset_email
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
+)
 def register(data: RegisterRequest, db: Session = Depends(get_db)):
     """
     Self-registration — doar pentru CLIENT.
-    
+
     Cum funcționează:
     1. Clientul accesează tms.ro/register/transport-rapid
     2. Frontend-ul citește "transport-rapid" din URL
@@ -74,9 +74,9 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
         password_hash=hash_password(data.password),
         full_name=data.full_name,
         role=RoleEnum.CLIENT,
-        company_id=company.id,       # asociat automat cu compania din slug
+        company_id=company.id,  # asociat automat cu compania din slug
         is_active=True,
-        is_approved=False,           # MANAGER-ul companiei trebuie să aprobe
+        is_approved=False,  # MANAGER-ul companiei trebuie să aprobe
         must_change_password=False,  # și-a setat singur parola
         phone=data.phone,
     )
@@ -116,7 +116,7 @@ def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Contul așteaptă aprobare de la administrator",
         )
-    
+
     user_role = user.role.value if hasattr(user.role, "value") else str(user.role)
 
     if user_role != "SUPER_ADMIN":
@@ -134,11 +134,13 @@ def login(
                 detail="Compania ta a fost dezactivată. Contactează administratorul platformei.",
             )
 
-    token = create_access_token({
-        "sub": str(user.id),
-        "role": user_role,
-        "company_id": str(user.company_id) if user.company_id else None,
-    })
+    token = create_access_token(
+        {
+            "sub": str(user.id),
+            "role": user_role,
+            "company_id": str(user.company_id) if user.company_id else None,
+        }
+    )
     return TokenResponse(
         access_token=token,
         must_change_password=user.must_change_password,
@@ -198,6 +200,8 @@ def forgot_password(
 
         reset_token = generate_reset_token()
 
+        print(reset_token)
+
         token_record = PasswordResetToken(
             user_id=user.id,
             token_hash=hash_reset_token(reset_token),
@@ -219,6 +223,7 @@ def forgot_password(
         "message": "Dacă adresa de email există în sistem, vei primi un link de resetare parolă în câteva momente."
     }
 
+
 @router.post("/reset-password", response_model=dict)
 def reset_password(
     data: ResetPasswordRequest,
@@ -232,10 +237,14 @@ def reset_password(
     """
     token_hash = hash_reset_token(data.token)
 
-    token_record = db.query(PasswordResetToken).filter(
-        PasswordResetToken.token_hash == token_hash,
-        PasswordResetToken.used_at.is_(None),
-    ).first()
+    token_record = (
+        db.query(PasswordResetToken)
+        .filter(
+            PasswordResetToken.token_hash == token_hash,
+            PasswordResetToken.used_at.is_(None),
+        )
+        .first()
+    )
 
     if not token_record:
         raise HTTPException(

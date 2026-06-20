@@ -188,3 +188,39 @@ body.modal-scroll-lock {
   border-color: var(--color-danger);
   background: var(--color-danger);
 }
+
+.password-input {
+  position: relative;
+}
+
+.password-input input {
+  padding-right: 48px;
+}
+
+.password-input .password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--color-text-muted);
+  box-shadow: none;
+  transform: translateY(-50%);
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+
+.password-input .password-toggle:hover:not(:disabled) {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  transform: translateY(-50%);
+  box-shadow: none;
+}

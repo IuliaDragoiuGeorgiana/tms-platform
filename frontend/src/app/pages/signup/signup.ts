@@ -16,6 +16,7 @@ import { TranslatePipe } from '../../core/pipes/translate';
 export class Signup implements OnInit {
   isLoading = false;
   isLoadingCompanies = false;
+  showPassword = false;
   successMessage = '';
   errorMessage = '';
   companyOptionsError = '';
@@ -40,6 +41,10 @@ export class Signup implements OnInit {
 
   ngOnInit(): void {
     this.loadCompanies();
+  }
+
+  togglePasswordVisibility(): void {
+    this.showPassword = !this.showPassword;
   }
 
   loadCompanies(): void {
