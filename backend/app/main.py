@@ -4,6 +4,7 @@ from app.routers import (
     companies,
     dashboard,
     drivers,
+    incidents,
     orders,
     planning,
     system_config,
@@ -33,6 +34,7 @@ app.include_router(companies.router)
 app.include_router(dashboard.router)
 app.include_router(vehicles.router)
 app.include_router(drivers.router)
+app.include_router(incidents.router)
 app.include_router(orders.router)
 app.include_router(planning.router)
 app.include_router(trips.router)

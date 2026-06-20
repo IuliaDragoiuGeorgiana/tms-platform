@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_roles
@@ -56,6 +56,44 @@ def _ensure_driver_can_view_trip(trip: Trip, db: Session, current_user: User) ->
     driver = _get_current_driver(db, current_user)
     if trip.driver_id != driver.id or trip.status not in DRIVER_VISIBLE_STATUSES:
         raise HTTPException(status_code=404, detail="Cursa nu a fost găsită")
+
+
+def _planned_service_minutes(stop: TripStop) -> int:
+    if not stop.order:
+        return 0
+    if stop.stop_type == StopTypeEnum.PICKUP:
+        return stop.order.pickup_service_minutes or 0
+    return stop.order.delivery_service_minutes or 0
+
+
+def _refresh_future_etas(
+    db: Session,
+    anchor_stop: TripStop,
+    anchor_time: datetime,
+    anchor_includes_service: bool = False,
+) -> None:
+    if not anchor_stop.eta_planned:
+        return
+
+    planned_anchor = anchor_stop.eta_planned
+    if anchor_includes_service:
+        planned_anchor += timedelta(minutes=_planned_service_minutes(anchor_stop))
+
+    deviation = anchor_time - planned_anchor
+    future_stops = (
+        db.query(TripStop)
+        .filter(
+            TripStop.trip_id == anchor_stop.trip_id,
+            TripStop.sequence > anchor_stop.sequence,
+            TripStop.status == StopStatusEnum.PENDING,
+        )
+        .order_by(TripStop.sequence)
+        .all()
+    )
+
+    for future_stop in future_stops:
+        if future_stop.eta_planned:
+            future_stop.eta_actual = future_stop.eta_planned + deviation
 
 
 def _complete_trip_if_no_pending_stops(trip: Trip, db: Session) -> None:
@@ -261,6 +299,8 @@ def start_trip(
 
     # Actualizează statusul comenzilor la IN_DELIVERY
     for stop in trip.stops:
+        if stop.status == StopStatusEnum.PENDING:
+            stop.eta_actual = stop.eta_planned
         if stop.stop_type == StopTypeEnum.PICKUP:
             stop.order.status = OrderStatusEnum.IN_DELIVERY
 
@@ -333,8 +373,10 @@ def arrive_at_stop(
             detail="Trebuie să finalizezi mai întâi oprirea anterioară.",
         )
 
-    stop.arrival_time = datetime.now(timezone.utc)
-    stop.eta_actual = datetime.now(timezone.utc)
+    arrival_time = datetime.now(timezone.utc)
+    stop.arrival_time = arrival_time
+    stop.eta_actual = arrival_time
+    _refresh_future_etas(db, stop, arrival_time)
     db.commit()
     db.refresh(stop)
 
@@ -421,6 +463,13 @@ def complete_stop(
     # Doar la DELIVERY marcăm întreaga comandă ca livrată.
     if stop.stop_type == StopTypeEnum.DELIVERY:
         stop.order.status = OrderStatusEnum.DELIVERED
+
+    _refresh_future_etas(
+        db,
+        stop,
+        stop.departure_time,
+        anchor_includes_service=True,
+    )
 
     _complete_trip_if_no_pending_stops(trip, db)
 
@@ -537,6 +586,13 @@ def fail_stop(
     # Comanda devine FAILED
     stop.order.status = OrderStatusEnum.FAILED
     stop.order.attempts_count += 1
+
+    _refresh_future_etas(
+        db,
+        stop,
+        stop.departure_time,
+        anchor_includes_service=True,
+    )
 
     _complete_trip_if_no_pending_stops(trip, db)
 

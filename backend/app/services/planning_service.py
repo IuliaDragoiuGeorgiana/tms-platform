@@ -1169,6 +1169,7 @@ def _plan_day(
                 if stop_type == StopTypeEnum.DELIVERY:
                     order.status = OrderStatusEnum.PLANNED
                     order.assigned_delivery_date = planned_date
+                    order.was_postponed = False
 
             stop_type_value = (
                 stop_type.value
@@ -2478,6 +2479,7 @@ def add_order_to_trip(
 
     order_to_add.status = OrderStatusEnum.PLANNED
     order_to_add.assigned_delivery_date = trip.planned_date
+    order_to_add.was_postponed = False
 
     db.commit()
     db.refresh(trip)
@@ -2896,6 +2898,7 @@ def create_ad_hoc_trip(
         for order in ordered_orders:
             order.status = OrderStatusEnum.PLANNED
             order.assigned_delivery_date = planned_date
+            order.was_postponed = False
 
         db.commit()
         db.refresh(trip)
@@ -3368,6 +3371,7 @@ def create_adhoc_planning_session(
         for order in ordered_orders:
             order.status = OrderStatusEnum.PLANNED
             order.assigned_delivery_date = planned_date
+            order.was_postponed = False
 
         db.commit()
         db.refresh(trip)
@@ -3615,7 +3619,12 @@ def run_planning(
 
     geocoded_orders = sorted(
         geocoded_orders,
-        key=lambda order: (priority_rank(order), order.delivery_deadline, order.created_at),
+        key=lambda order: (
+            0 if order.was_postponed else 1,
+            priority_rank(order),
+            order.delivery_deadline,
+            order.created_at,
+        ),
     )
 
     # PAS 3: Vehicule și driveri

@@ -205,6 +205,7 @@ def distribute_greedy_deadline(
     sorted_orders = sorted(
         orders,
         key=lambda o: (
+            0 if o.was_postponed else 1,
             -_priority_weight(o),
             o.delivery_deadline,
             o.created_at,
@@ -289,6 +290,7 @@ def distribute_max_density(
         cluster_orders_list = sorted(
             cluster_orders_list,
             key=lambda o: (
+                0 if o.was_postponed else 1,
                 -_priority_weight(o),
                 o.delivery_deadline,
                 o.created_at,
@@ -296,6 +298,9 @@ def distribute_max_density(
         )
 
         ordered_orders.extend(cluster_orders_list)
+    ordered_orders.sort(
+        key=lambda o: 0 if o.was_postponed else 1
+    )
 
     return _chunk_orders_into_days(
         ordered_list=ordered_orders,
@@ -346,6 +351,7 @@ def distribute_hybrid(
     sorted_orders = sorted(
         orders,
         key=lambda o: (
+            0 if o.was_postponed else 1,
             -composite_scores.get(str(o.id), 0),
             o.delivery_deadline,
         ),

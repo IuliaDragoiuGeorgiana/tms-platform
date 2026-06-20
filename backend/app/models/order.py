@@ -115,6 +115,12 @@ class Order(UUIDPrimaryKey, FullTimestampMixin, Base):
         server_default="false",
         nullable=False,
     )
+    was_postponed: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
     problem_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships

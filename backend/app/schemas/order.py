@@ -269,6 +269,7 @@ class OrderResponse(BaseModel):
     created_at: datetime
 
     is_problematic: bool
+    was_postponed: bool
     problem_reason: str | None
 
     model_config = {"from_attributes": True}
