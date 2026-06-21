@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import date, timedelta
 from sqlalchemy import or_
 import uuid
+from time import perf_counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.database import get_db, SessionLocal
@@ -52,6 +53,7 @@ def _run_strategy_in_thread(
     """
     db = SessionLocal()
     try:
+        started_at = perf_counter()
         result = run_planning(
             db=db,
             company_id=company_id,
@@ -61,6 +63,11 @@ def _run_strategy_in_thread(
             dry_run=True,
             date_start=date_start,
             date_end=date_end,
+        )
+        result.setdefault("debug_timings", {})
+        result["debug_timings"]["strategy_elapsed_ms"] = round(
+            (perf_counter() - started_at) * 1000,
+            2,
         )
         return strategy, result
     finally:
@@ -242,6 +249,8 @@ def compare_strategies(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("DISPECER", "MANAGER")),
 ):
+    request_started_at = perf_counter()
+
     if body.date_start < date.today():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -252,23 +261,6 @@ def compare_strategies(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Data de final nu poate fi înaintea datei de început",
-        )
-
-    warmup_result = run_planning(
-        db=db,
-        company_id=current_user.company_id,
-        planned_date=body.date_start,
-        created_by_id=current_user.id,
-        strategy=PlanningStrategyEnum.GREEDY_DEADLINE,
-        dry_run=True,
-        date_start=body.date_start,
-        date_end=body.date_end,
-    )
-
-    if "error" in warmup_result:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=warmup_result["error"],
         )
 
     db.expire_all()
@@ -282,7 +274,9 @@ def compare_strategies(
     variants = []
     strategy_results = {}
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    # ORS matrix calls are externally rate-limited. Running the three strategy
+    # dry-runs in parallel creates 429 bursts, so keep comparison serialized.
+    with ThreadPoolExecutor(max_workers=1) as executor:
         futures = {
             executor.submit(
                 _run_strategy_in_thread,
@@ -329,11 +323,73 @@ def compare_strategies(
                 "warnings": result.get("warnings"),
                 "dropped_orders": result.get("dropped_orders"),
                 "cluster_debug_by_day": result.get("cluster_debug_by_day", []),
+                "debug_timings": result.get("debug_timings"),
+                "performance_debug_by_day": result.get("performance_debug_by_day", []),
             })
+
+    print(
+        "\n[planning.compare-strategies] "
+        f"{body.date_start} -> {body.date_end} "
+        f"elapsed={round((perf_counter() - request_started_at) * 1000, 2)}ms"
+    )
+    for variant in variants:
+        if variant.get("error"):
+            print(f"  {variant['strategy']}: ERROR {variant['error']}")
+            continue
+
+        timings = variant.get("debug_timings") or {}
+        days = variant.get("performance_debug_by_day") or []
+        matrix_calls = sum(day.get("matrix_calls", 0) for day in days)
+        cache_hits = sum(day.get("matrix_cache_hits", 0) for day in days)
+        fallbacks = sum(day.get("matrix_fallbacks", 0) for day in days)
+        solver_calls = sum(day.get("solver_calls", 0) for day in days)
+        solver_cache_hits = sum(day.get("solver_cache_hits", 0) for day in days)
+        retry_attempts = sum(day.get("retry_attempts", 0) for day in days)
+
+        slowest_cluster = None
+        for day in days:
+            for cluster in day.get("clusters", []):
+                if (
+                    slowest_cluster is None
+                    or cluster.get("elapsed_ms", 0) > slowest_cluster.get("elapsed_ms", 0)
+                ):
+                    slowest_cluster = {
+                        **cluster,
+                        "planned_date": day.get("planned_date"),
+                    }
+
+        print(
+            f"  {variant.get('strategy')}: "
+            f"total={timings.get('total_elapsed_ms')}ms "
+            f"plan_days={timings.get('plan_days_ms')}ms "
+            f"matrices={matrix_calls} cache_hits={cache_hits} fallbacks={fallbacks} "
+            f"solver_calls={solver_calls} solver_cache_hits={solver_cache_hits} "
+            f"retries={retry_attempts}"
+        )
+        if slowest_cluster:
+            print(
+                "    slowest_cluster: "
+                f"date={slowest_cluster.get('planned_date')} "
+                f"idx={slowest_cluster.get('cluster_idx')} "
+                f"elapsed={slowest_cluster.get('elapsed_ms')}ms "
+                f"orders={slowest_cluster.get('initial_orders')}->{slowest_cluster.get('final_orders')} "
+                f"matrix_calls={slowest_cluster.get('matrix_calls')} "
+                f"fallbacks={slowest_cluster.get('matrix_fallbacks')} "
+                f"solver_calls={slowest_cluster.get('solver_calls')} "
+                f"solver_cache_hits={slowest_cluster.get('solver_cache_hits')} "
+                f"retries={slowest_cluster.get('retry_attempts')} "
+                f"minutes={slowest_cluster.get('total_minutes')} "
+                f"km={slowest_cluster.get('total_km')}"
+            )
 
     return {
         "date_start": str(body.date_start),
         "date_end": str(body.date_end),
+        "debug_timings": {
+            "compare_elapsed_ms": round((perf_counter() - request_started_at) * 1000, 2),
+            "warmup_run_removed": True,
+            "strategies_run": [strategy.value for strategy in strategies],
+        },
         "variants": variants,
     }
 

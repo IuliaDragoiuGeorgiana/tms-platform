@@ -4,6 +4,7 @@ Orchestrează pipeline-ul: geocodare → clustering → PDP → salvare în DB.
 """
 import uuid
 from datetime import date, datetime, timezone, timedelta
+from time import perf_counter
 from sqlalchemy.orm import Session
 
 from app.models.order import Order, OrderStatusEnum
@@ -27,10 +28,14 @@ LOCAL_TZ = ZoneInfo("Europe/Bucharest")
 DEFAULT_BREAK_MINUTES = 30
 DEFAULT_TRAVEL_BUFFER_MINUTES = 30
 DEFAULT_WAITING_BUFFER_MINUTES = 15
+PDP_SOLVER_MAX_TIME_SECONDS = 2
+PDP_SOLVER_DRY_RUN_MAX_TIME_SECONDS = 1
 PLANNING_POOL_STATUSES = (
     OrderStatusEnum.PENDING,
     OrderStatusEnum.FAILED,
 )
+
+_pdp_solver_cache: dict[tuple, dict | None] = {}
 
 
 
@@ -662,6 +667,20 @@ def _plan_day(
     all_operational_warnings = []
     all_load_compatibility_warnings = []
     dropped_orders_info = []
+    day_started_at = perf_counter()
+    performance_debug = {
+        "planned_date": str(planned_date),
+        "initial_orders": len(day_orders),
+        "matrix_calls": 0,
+        "matrix_cache_hits": 0,
+        "matrix_fallbacks": 0,
+        "matrix_elapsed_ms": 0.0,
+        "solver_calls": 0,
+        "solver_cache_hits": 0,
+        "solver_elapsed_ms": 0.0,
+        "retry_attempts": 0,
+        "clusters": [],
+    }
 
     available_vehicles = vehicles.copy()
     available_drivers = drivers.copy()
@@ -747,6 +766,26 @@ def _plan_day(
     # ---- Pentru fiecare cluster → retry vehicule → retry comenzi → trip ----
     for cluster_idx in sorted_cluster_indices:
         cluster_orders_list = clusters[cluster_idx]
+        cluster_started_at = perf_counter()
+        cluster_performance = {
+            "cluster_idx": int(cluster_idx),
+            "initial_orders": len(cluster_orders_list),
+            "retry_attempts": 0,
+            "matrix_calls": 0,
+            "matrix_cache_hits": 0,
+            "matrix_fallbacks": 0,
+            "matrix_elapsed_ms": 0.0,
+            "solver_calls": 0,
+            "solver_cache_hits": 0,
+            "solver_elapsed_ms": 0.0,
+            "vehicle_attempts": 0,
+            "dropped_orders": 0,
+            "final_orders": 0,
+            "planned": False,
+            "total_km": 0.0,
+            "total_minutes": 0,
+            "elapsed_ms": 0.0,
+        }
 
         # Verificări operaționale
         for order in cluster_orders_list:
@@ -778,6 +817,12 @@ def _plan_day(
                     "delivery_deadline": str(order.delivery_deadline),
                 })
 
+            cluster_performance["dropped_orders"] = len(cluster_orders_list)
+            cluster_performance["elapsed_ms"] = round(
+                (perf_counter() - cluster_started_at) * 1000,
+                2,
+            )
+            performance_debug["clusters"].append(cluster_performance)
             continue
 
         # ======================================================
@@ -793,6 +838,9 @@ def _plan_day(
         dropped_from_cluster = []
 
         while current_orders:
+            performance_debug["retry_attempts"] += 1
+            cluster_performance["retry_attempts"] += 1
+
             # Găsește vehiculele compatibile cu comenzile curente
             max_order_kg = max(float(order.kg) for order in current_orders)
             max_order_m3 = max(float(order.m3) for order in current_orders)
@@ -877,7 +925,19 @@ def _plan_day(
             )
 
             # Calculează matricea ORS
+            matrix_started_at = perf_counter()
             retry_matrix = get_distance_matrix(solver_data["coords"])
+            matrix_elapsed_ms = (perf_counter() - matrix_started_at) * 1000
+            performance_debug["matrix_calls"] += 1
+            performance_debug["matrix_elapsed_ms"] += matrix_elapsed_ms
+            cluster_performance["matrix_calls"] += 1
+            cluster_performance["matrix_elapsed_ms"] += matrix_elapsed_ms
+            if retry_matrix and retry_matrix.get("cache_hit"):
+                performance_debug["matrix_cache_hits"] += 1
+                cluster_performance["matrix_cache_hits"] += 1
+            if retry_matrix and retry_matrix.get("fallback"):
+                performance_debug["matrix_fallbacks"] += 1
+                cluster_performance["matrix_fallbacks"] += 1
 
             if not retry_matrix:
                 for order in current_orders:
@@ -898,18 +958,69 @@ def _plan_day(
             route_found_without_driver = False
 
             for vehicle_candidate in compatible_vehicles:
-                candidate_result = solve_pdp_for_cluster(
-                    distance_matrix=retry_matrix["distances"],
-                    duration_matrix=retry_matrix["durations"],
-                    pickups_deliveries=solver_data["pickups_deliveries"],
-                    demands=solver_data["demands"],
-                    vehicle_capacity_kg=int(float(vehicle_candidate.capacity_kg)),
-                    volume_demands=solver_data["volume_demands"],
-                    vehicle_capacity_m3=int(float(vehicle_candidate.capacity_m3) * 100),
-                    time_windows=solver_data["time_windows"],
-                    service_times=solver_data["service_times"],
-                    max_time_seconds=2,
+                cluster_performance["vehicle_attempts"] += 1
+                vehicle_capacity_kg = int(float(vehicle_candidate.capacity_kg))
+                vehicle_capacity_m3 = int(float(vehicle_candidate.capacity_m3) * 100)
+                solver_cache_key = (
+                    tuple(
+                        (
+                            str(order.id),
+                            round(float(order.pickup_lat), 6),
+                            round(float(order.pickup_lon), 6),
+                            round(float(order.delivery_lat), 6),
+                            round(float(order.delivery_lon), 6),
+                            int(float(order.kg)),
+                            int(float(order.m3) * 100),
+                            order.pickup_time_window_start.isoformat()
+                            if order.pickup_time_window_start
+                            else None,
+                            order.pickup_time_window_end.isoformat()
+                            if order.pickup_time_window_end
+                            else None,
+                            order.delivery_time_window_start.isoformat()
+                            if order.delivery_time_window_start
+                            else None,
+                            order.delivery_time_window_end.isoformat()
+                            if order.delivery_time_window_end
+                            else None,
+                            int(order.pickup_service_minutes or 0),
+                            int(order.delivery_service_minutes or 0),
+                        )
+                        for order in current_orders
+                    ),
+                    vehicle_capacity_kg,
+                    vehicle_capacity_m3,
+                    depot_start_seconds,
                 )
+
+                if solver_cache_key in _pdp_solver_cache:
+                    candidate_result = _pdp_solver_cache[solver_cache_key]
+                    performance_debug["solver_cache_hits"] += 1
+                    cluster_performance["solver_cache_hits"] += 1
+                else:
+                    performance_debug["solver_calls"] += 1
+                    cluster_performance["solver_calls"] += 1
+                    solver_started_at = perf_counter()
+                    candidate_result = solve_pdp_for_cluster(
+                        distance_matrix=retry_matrix["distances"],
+                        duration_matrix=retry_matrix["durations"],
+                        pickups_deliveries=solver_data["pickups_deliveries"],
+                        demands=solver_data["demands"],
+                        vehicle_capacity_kg=vehicle_capacity_kg,
+                        volume_demands=solver_data["volume_demands"],
+                        vehicle_capacity_m3=vehicle_capacity_m3,
+                        time_windows=solver_data["time_windows"],
+                        service_times=solver_data["service_times"],
+                        max_time_seconds=(
+                            PDP_SOLVER_DRY_RUN_MAX_TIME_SECONDS
+                            if dry_run
+                            else PDP_SOLVER_MAX_TIME_SECONDS
+                        ),
+                    )
+                    _pdp_solver_cache[solver_cache_key] = candidate_result
+                    solver_elapsed_ms = (perf_counter() - solver_started_at) * 1000
+                    performance_debug["solver_elapsed_ms"] += solver_elapsed_ms
+                    cluster_performance["solver_elapsed_ms"] += solver_elapsed_ms
 
                 if not candidate_result:
                     continue
@@ -946,6 +1057,11 @@ def _plan_day(
                     chosen_pair = candidate_pair
                     found_solution = True
                     break
+
+                # If a feasible route exists but no driver can fit its time range,
+                # larger vehicles will not add driver time. Drop/retry orders now
+                # instead of spending the solver time limit on every vehicle.
+                break
 
             if found_solution:
                 break
@@ -1019,6 +1135,7 @@ def _plan_day(
             current_orders.pop(remove_idx)
 
         # Înregistrează comenzile scoase din motive diverse
+        cluster_performance["dropped_orders"] = len(dropped_from_cluster)
         for item in dropped_from_cluster:
             order = item["order"]
 
@@ -1037,6 +1154,11 @@ def _plan_day(
 
         # Dacă nu a rămas nicio comandă sau nu avem soluție, skip
         if not current_orders or not solver_result or not chosen_pair:
+            cluster_performance["elapsed_ms"] = round(
+                (perf_counter() - cluster_started_at) * 1000,
+                2,
+            )
+            performance_debug["clusters"].append(cluster_performance)
             continue
 
         # Extrage metrici care au fost deja calculate în while
@@ -1061,6 +1183,10 @@ def _plan_day(
         driver = chosen_driver
         planned_cluster_orders = current_orders
         num_orders_in_cluster = len(planned_cluster_orders)
+        cluster_performance["planned"] = True
+        cluster_performance["final_orders"] = num_orders_in_cluster
+        cluster_performance["total_km"] = round(total_km, 1)
+        cluster_performance["total_minutes"] = round(total_minutes)
 
         # Reconstruim demands pentru peak load
         final_demands = [0]
@@ -1312,6 +1438,25 @@ def _plan_day(
             "stops": trip_stops_preview,
         })
 
+        cluster_performance["elapsed_ms"] = round(
+            (perf_counter() - cluster_started_at) * 1000,
+            2,
+        )
+        performance_debug["clusters"].append(cluster_performance)
+
+    performance_debug["matrix_elapsed_ms"] = round(
+        performance_debug["matrix_elapsed_ms"],
+        2,
+    )
+    performance_debug["solver_elapsed_ms"] = round(
+        performance_debug["solver_elapsed_ms"],
+        2,
+    )
+    performance_debug["elapsed_ms"] = round(
+        (perf_counter() - day_started_at) * 1000,
+        2,
+    )
+
     return {
         "used_num_clusters": num_clusters,
         "cluster_debug": cluster_debug,
@@ -1320,6 +1465,7 @@ def _plan_day(
         "operational_warnings": all_operational_warnings,
         "load_compatibility_warnings": all_load_compatibility_warnings,
         "dropped_orders": dropped_orders_info,
+        "performance_debug": performance_debug,
     }
 
 def _has_driver_time_exceeded(result: dict | None) -> bool:
@@ -3532,6 +3678,10 @@ def run_planning(
     """
     Pipeline complet de planificare Pickup & Delivery — cu suport multi-day.
     """
+    planning_started_at = perf_counter()
+    stage_started_at = perf_counter()
+    debug_timings = {}
+
     if date_start is None:
         date_start = planned_date
     if date_end is None:
@@ -3547,14 +3697,19 @@ def run_planning(
     except ValueError as e:
         return {"error": str(e)}
 
+    debug_timings["company_depot_ms"] = round(
+        (perf_counter() - stage_started_at) * 1000,
+        2,
+    )
+
     day_dates = []
     current_day = date_start
     while current_day <= date_end:
         day_dates.append(current_day)
         current_day += timedelta(days=1)
 
-
     # PAS 1: Comenzi eligibile
+    stage_started_at = perf_counter()
     orders = db.query(Order).filter(
         Order.company_id == company_id,
         Order.status.in_(PLANNING_POOL_STATUSES),
@@ -3578,7 +3733,13 @@ def run_planning(
     if not eligible_orders:
         return {"error": "Nu există comenzi eligibile pentru intervalul selectat"}
 
+    debug_timings["eligible_orders_ms"] = round(
+        (perf_counter() - stage_started_at) * 1000,
+        2,
+    )
+
     # PAS 2: Geocodare (cache)
+    stage_started_at = perf_counter()
     for order in eligible_orders:
         if order.pickup_lat is None or order.pickup_lon is None:
             pickup_address = _build_order_address_for_geocoding(order, "pickup")
@@ -3608,6 +3769,11 @@ def run_planning(
 
     db.commit()
 
+    debug_timings["geocoding_ms"] = round(
+        (perf_counter() - stage_started_at) * 1000,
+        2,
+    )
+
     geocoded_orders = [
         o for o in eligible_orders
         if o.pickup_lat is not None and o.pickup_lon is not None
@@ -3628,6 +3794,7 @@ def run_planning(
     )
 
     # PAS 3: Vehicule și driveri
+    stage_started_at = perf_counter()
     vehicles = db.query(Vehicle).filter(
         Vehicle.company_id == company_id,
         Vehicle.status == VehicleStatusEnum.DISPONIBIL,
@@ -3653,7 +3820,13 @@ def run_planning(
         orders=geocoded_orders,
     )
 
+    debug_timings["resources_and_estimates_ms"] = round(
+        (perf_counter() - stage_started_at) * 1000,
+        2,
+    )
+
     # PAS 4: Distribuie pe zile
+    stage_started_at = perf_counter()
     distribution = distribute_orders_by_strategy(
         orders=geocoded_orders,
         strategy=strategy,
@@ -3669,6 +3842,11 @@ def run_planning(
         distribution=distribution,
         date_start=date_start,
         date_end=date_end,
+    )
+
+    debug_timings["distribution_ms"] = round(
+        (perf_counter() - stage_started_at) * 1000,
+        2,
     )
 
     # PAS 5: PlanningSession
@@ -3695,6 +3873,8 @@ def run_planning(
     all_load_compatibility_warnings = []
     all_dropped_orders = []
     cluster_debug_by_day = []
+    performance_debug_by_day = []
+    stage_started_at = perf_counter()
 
     for day_date in sorted(distribution["days"].keys()):
         day_orders = distribution["days"][day_date]
@@ -3719,12 +3899,18 @@ def run_planning(
             "used_num_clusters": day_result.get("used_num_clusters"),
             "cluster_debug": day_result.get("cluster_debug", []),
         })
+        performance_debug_by_day.append(day_result.get("performance_debug", {}))
 
         all_trips.extend(day_result["trips"])
         all_warnings.extend(day_result["warnings"])
         all_operational_warnings.extend(day_result["operational_warnings"])
         all_load_compatibility_warnings.extend(day_result["load_compatibility_warnings"])
         all_dropped_orders.extend(day_result["dropped_orders"])
+
+    debug_timings["plan_days_ms"] = round(
+        (perf_counter() - stage_started_at) * 1000,
+        2,
+    )
 
     for order in distribution.get("deferred", []):
         all_dropped_orders.append({
@@ -3768,6 +3954,11 @@ def run_planning(
         }
         db.commit()
 
+    debug_timings["total_elapsed_ms"] = round(
+        (perf_counter() - planning_started_at) * 1000,
+        2,
+    )
+
     return {
         "planning_session_id": str(planning_session_id) if planning_session_id else None,
         "strategy": strategy.value if hasattr(strategy, "value") else str(strategy),
@@ -3792,4 +3983,6 @@ def run_planning(
         "load_compatibility_warnings": all_load_compatibility_warnings,
         "dropped_orders": all_dropped_orders,
         "cluster_debug_by_day": cluster_debug_by_day,
+        "performance_debug_by_day": performance_debug_by_day,
+        "debug_timings": debug_timings,
     }
