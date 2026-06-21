@@ -105,6 +105,10 @@ def get_vehicle_trip_fit(
         order_ids_list = [oid.strip() for oid in order_ids.split(",")]
 
     result = analytics_service.get_vehicle_trip_fit(db, current_user.company_id, trip_id, order_ids_list)
+    if "error" in result:
+        status_code = 404 if "not found" in result["error"].lower() else 400
+        raise HTTPException(status_code=status_code, detail=result["error"])
+
     return result
 
 

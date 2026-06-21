@@ -3,11 +3,12 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 import { AnalyticsService, ZoneDemandResponse, FleetUtilizationResponse, PlanVsActualResponse, CostAnalyticsResponse } from '../../core/services/analytics';
+import { I18nService } from '../../core/services/i18n';
+import { TranslatePipe } from '../../core/pipes/translate';
 
 @Component({
   selector: 'app-analytics',
-  standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslatePipe],
   templateUrl: './analytics.html',
   styleUrl: './analytics.scss',
 })
@@ -25,7 +26,10 @@ export class Analytics implements OnInit {
 
   protected readonly selectedTab = signal<'overview' | 'zones' | 'fleet' | 'plan-vs-actual' | 'costs' | 'incidents'>('overview');
 
-  constructor(private analyticsService: AnalyticsService) {
+  constructor(
+    private analyticsService: AnalyticsService,
+    private i18n: I18nService,
+  ) {
     this.initializeDateRange();
   }
 
@@ -66,7 +70,7 @@ export class Analytics implements OnInit {
         this.loading.set(false);
       })
       .catch((err) => {
-        this.error.set('Failed to load analytics data');
+        this.error.set(this.i18n.translate('analytics.error_load'));
         this.loading.set(false);
       });
   }
@@ -76,21 +80,21 @@ export class Analytics implements OnInit {
   }
 
   protected getQualityColor(score: number): string {
-    if (score >= 70) return '#16a34a';
-    if (score >= 40) return '#f59e0b';
-    return '#dc2626';
+    if (score >= 70) return 'var(--color-success)';
+    if (score >= 40) return 'var(--color-warning)';
+    return 'var(--color-danger)';
   }
 
   protected getDemandColor(level: string): string {
     switch (level) {
       case 'HIGH':
-        return '#dc2626';
+        return 'var(--color-danger)';
       case 'MEDIUM':
-        return '#f59e0b';
+        return 'var(--color-warning)';
       case 'LOW':
-        return '#16a34a';
+        return 'var(--color-success)';
       default:
-        return '#6b7280';
+        return 'var(--color-secondary)';
     }
   }
 
