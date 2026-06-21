@@ -196,6 +196,10 @@
     <a routerLink="/incidents" routerLinkActive="active">
       <app-icon class="nav-icon" name="alert-triangle" />
       <span>{{ 'nav.incidents' | translate }}</span>
+</a>
+    <a routerLink="/analytics" routerLinkActive="active">
+      <app-icon class="nav-icon" name="clipboard-list" />
+      <span>{{ 'nav.analytics' | translate }}</span>
     </a>
     } @if (
       currentRole === RoleEnum.MANAGER ||

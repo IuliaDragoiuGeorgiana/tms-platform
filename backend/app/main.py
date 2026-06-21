@@ -1,5 +1,6 @@
 from app.routers import (
     admin,
+    analytics,
     auth,
     companies,
     dashboard,
@@ -39,6 +40,7 @@ app.include_router(orders.router)
 app.include_router(planning.router)
 app.include_router(trips.router)
 app.include_router(system_config.router)
+app.include_router(analytics.router)
 
 
 @app.get("/")

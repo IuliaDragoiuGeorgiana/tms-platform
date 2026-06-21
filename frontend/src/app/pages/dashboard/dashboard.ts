@@ -1,7 +1,9 @@
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { RouterLink } from '@angular/router';
 
 import { AuthService, RoleEnum } from '../../core/services/auth';
+import { Icon } from '../../shared/icon/icon';
 import {
   AttentionItem,
   ChartPoint,
@@ -484,7 +486,7 @@ const ROLE_DASHBOARDS: Record<RoleEnum, RoleDashboard> = {
 
 @Component({
   selector: 'app-dashboard',
-  imports: [CommonModule, TranslatePipe],
+  imports: [CommonModule, TranslatePipe, RouterLink, Icon],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })

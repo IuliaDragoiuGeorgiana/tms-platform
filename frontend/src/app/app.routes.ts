@@ -14,6 +14,7 @@ import { Tracking } from './pages/tracking/tracking';
 import { Planning } from './pages/planning/planning';
 import { Trips } from './pages/trips/trips';
 import { Incidents } from './pages/incidents/incidents';
+import { Analytics } from './pages/analytics/analytics';
 import { superAdminGuard } from './core/guards/super-admin.guard';
 import { guestOnlyGuard } from './core/guards/guest-only.guard';
 import { authGuard } from './core/guards/auth.guard';
@@ -24,6 +25,7 @@ import { planningGuard } from './core/guards/planning.guard';
 import { tripsGuard } from './core/guards/trips.guard';
 import { dashboardGuard } from './core/guards/dashboard.guard';
 import { incidentsGuard } from './core/guards/incidents.guard';
+import { analyticsGuard } from './core/guards/analytics.guard';
 
 export const routes: Routes = [
   {
@@ -113,5 +115,10 @@ export const routes: Routes = [
   {
     path: 'tracking/:token',
     component: Tracking,
+  },
+  {
+    path: 'analytics',
+    component: Analytics,
+    canActivate: [analyticsGuard],
   },
 ];

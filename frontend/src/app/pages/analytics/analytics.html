@@ -1,0 +1,370 @@
+<div class="analytics-container">
+  <header class="analytics-header">
+    <div class="header-content">
+      <h1>Business Analytics</h1>
+      <p>Insights și metrici de performanță pentru operațiuni TMS</p>
+    </div>
+
+    <div class="date-filter">
+      <div class="date-input">
+        <label>Start Date</label>
+        <input type="date" [value]="startDate()" (change)="startDate.set($event.target.value)" />
+      </div>
+      <div class="date-input">
+        <label>End Date</label>
+        <input type="date" [value]="endDate()" (change)="endDate.set($event.target.value)" />
+      </div>
+      <button class="btn-apply" (click)="loadAnalytics()" [disabled]="loading()">
+        {{ loading() ? 'Loading...' : 'Apply Filter' }}
+      </button>
+    </div>
+  </header>
+
+  <!-- Loading & Error States -->
+  <div *ngIf="loading()" class="loading-container">
+    <div class="spinner"></div>
+    <p>Loading analytics data...</p>
+  </div>
+
+  <div *ngIf="error()" class="error-alert">
+    <p>{{ error() }}</p>
+    <button (click)="loadAnalytics()">Retry</button>
+  </div>
+
+  <!-- Tab Navigation -->
+  <div *ngIf="!loading() && !error()" class="tabs-container">
+    <nav class="tabs">
+      <button [class.active]="selectedTab() === 'overview'" (click)="selectTab('overview')" class="tab">
+        Overview
+      </button>
+      <button [class.active]="selectedTab() === 'zones'" (click)="selectTab('zones')" class="tab">
+        Zone Demand
+      </button>
+      <button [class.active]="selectedTab() === 'fleet'" (click)="selectTab('fleet')" class="tab">
+        Fleet Utilization
+      </button>
+      <button [class.active]="selectedTab() === 'plan-vs-actual'" (click)="selectTab('plan-vs-actual')" class="tab">
+        Plan vs Actual
+      </button>
+      <button [class.active]="selectedTab() === 'costs'" (click)="selectTab('costs')" class="tab">
+        Costs
+      </button>
+      <button [class.active]="selectedTab() === 'incidents'" (click)="selectTab('incidents')" class="tab">
+        Incidents
+      </button>
+    </nav>
+  </div>
+
+  <!-- Overview Tab -->
+  <section *ngIf="selectedTab() === 'overview' && !loading() && !error()" class="tab-content">
+    <div class="overview-grid">
+      <!-- Zone Demand Summary -->
+      <div *ngIf="zoneDemand()" class="card zone-demand-card">
+        <h3>Zone Demand Summary</h3>
+        <div class="zone-list">
+          <div *ngFor="let zone of zoneDemand()!.zones.slice(0, 5)" class="zone-item">
+            <div class="zone-header">
+              <span class="zone-name">{{ zone.zone }}</span>
+              <span class="zone-score" [style.color]="getDemandColor(zone.demand_level)">
+                {{ zone.zone_demand_score }}
+              </span>
+            </div>
+            <p class="zone-meta">{{ zone.orders_count }} orders | {{ zone.demand_level }}</p>
+            <div class="progress-bar">
+              <div class="progress-fill" [style.width.%]="zone.zone_demand_score"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fleet Utilization Summary -->
+      <div *ngIf="fleetUtilization()" class="card fleet-summary-card">
+        <h3>Fleet Utilization</h3>
+        <div class="stats-grid">
+          <div class="stat">
+            <span class="label">Used Vehicles</span>
+            <span class="value">{{ fleetUtilization()!.summary.used_vehicles }}</span>
+          </div>
+          <div class="stat">
+            <span class="label">Avg Load (kg)</span>
+            <span class="value">{{ formatPercentage(fleetUtilization()!.summary.average_load_kg_percent) }}</span>
+          </div>
+          <div class="stat">
+            <span class="label">Avg Load (m³)</span>
+            <span class="value">{{ formatPercentage(fleetUtilization()!.summary.average_load_m3_percent) }}</span>
+          </div>
+          <div class="stat">
+            <span class="label">Efficient Trips</span>
+            <span class="value">{{ fleetUtilization()!.summary.efficient_trips }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Plan vs Actual Summary -->
+      <div *ngIf="planVsActual()" class="card plan-vs-actual-card">
+        <h3>Plan vs Actual Performance</h3>
+        <div class="stats-grid">
+          <div class="stat">
+            <span class="label">On-Time Rate</span>
+            <span class="value">{{ formatPercentage(planVsActual()!.on_time_rate) }}</span>
+          </div>
+          <div class="stat">
+            <span class="label">Avg Delay</span>
+            <span class="value">{{ formatNumber(planVsActual()!.average_delay_minutes) }} min</span>
+          </div>
+          <div class="stat">
+            <span class="label">Service Time Deviation</span>
+            <span class="value">{{ formatNumber(planVsActual()!.average_service_time_deviation, 1) }} min</span>
+          </div>
+          <div class="stat">
+            <span class="label">Trips On-Time</span>
+            <span class="value">{{ planVsActual()!.trips_finished_on_time }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Costs Summary -->
+      <div *ngIf="costs()" class="card costs-summary-card">
+        <h3>Cost Analysis</h3>
+        <div class="stats-grid">
+          <div class="stat">
+            <span class="label">Total Actual Cost</span>
+            <span class="value">{{ formatCurrency(costs()!.total_actual_cost) }}</span>
+          </div>
+          <div class="stat">
+            <span class="label">Cost per Order</span>
+            <span class="value">{{ formatCurrency(costs()!.cost_per_order) }}</span>
+          </div>
+          <div class="stat">
+            <span class="label">Cost per km</span>
+            <span class="value">{{ formatCurrency(costs()!.cost_per_km) }}</span>
+          </div>
+          <div class="stat">
+            <span class="label">Variance</span>
+            <span class="value" [class.positive]="costs()!.planned_vs_actual_variance >= 0">
+              {{ formatPercentage(costs()!.planned_vs_actual_variance_percent) }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Zone Demand Tab -->
+  <section *ngIf="selectedTab() === 'zones' && !loading() && !error()" class="tab-content">
+    <div *ngIf="zoneDemand()" class="zones-container">
+      <div class="zones-grid">
+        <div *ngFor="let zone of zoneDemand()!.zones" class="zone-card">
+          <div class="card-header">
+            <h4>{{ zone.zone }}</h4>
+            <span class="score-badge" [style.background-color]="getDemandColor(zone.demand_level)">
+              {{ zone.zone_demand_score }}
+            </span>
+          </div>
+
+          <div class="zone-metrics">
+            <div class="metric">
+              <span class="label">Total Orders</span>
+              <span class="value">{{ zone.orders_count }}</span>
+            </div>
+            <div class="metric">
+              <span class="label">Delivered</span>
+              <span class="value">{{ zone.delivered_orders }}</span>
+            </div>
+            <div class="metric">
+              <span class="label">Failed</span>
+              <span class="value">{{ zone.failed_orders }}</span>
+            </div>
+            <div class="metric">
+              <span class="label">Pending</span>
+              <span class="value">{{ zone.pending_orders }}</span>
+            </div>
+          </div>
+
+          <div class="zone-volume">
+            <p><strong>Volume:</strong> {{ formatNumber(zone.total_kg) }} kg | {{ formatNumber(zone.total_m3) }} m³</p>
+            <p><strong>Special Types:</strong> {{ zone.urgent_orders }} urgent, {{ zone.critical_orders }} critical, {{ zone.adr_orders }} ADR</p>
+          </div>
+
+          <div class="recommendation">
+            <p>{{ zone.recommendation }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Fleet Utilization Tab -->
+  <section *ngIf="selectedTab() === 'fleet' && !loading() && !error()" class="tab-content">
+    <div *ngIf="fleetUtilization()" class="fleet-container">
+      <div class="fleet-trips">
+        <div *ngFor="let trip of fleetUtilization()!.trips.slice(0, 10)" class="trip-card">
+          <div class="card-header">
+            <span class="trip-id">{{ trip.trip_id }}</span>
+            <span class="utilization-badge" [class]="trip.utilization_level.toLowerCase()">
+              {{ trip.utilization_level }}
+            </span>
+          </div>
+
+          <div class="trip-info">
+            <p><strong>Vehicle:</strong> {{ trip.vehicle_plate }}</p>
+            <p><strong>Orders:</strong> {{ trip.orders_count }} | <strong>Stops:</strong> {{ trip.stops_count }}</p>
+            <p><strong>Load:</strong> {{ formatPercentage(trip.load_kg_percent) }} kg | {{ formatPercentage(trip.load_m3_percent) }} m³</p>
+          </div>
+
+          <div class="recommendation">{{ trip.recommendation }}</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Plan vs Actual Tab -->
+  <section *ngIf="selectedTab() === 'plan-vs-actual' && !loading() && !error()" class="tab-content">
+    <div *ngIf="planVsActual()" class="plan-vs-actual-container">
+      <div class="summary-cards">
+        <div class="card">
+          <h4>Overall Performance</h4>
+          <div class="metrics">
+            <div class="metric">
+              <span class="label">On-Time Stops</span>
+              <span class="value">{{ planVsActual()!.on_time_stops }} / {{ planVsActual()!.on_time_stops + planVsActual()!.late_stops }}</span>
+            </div>
+            <div class="metric">
+              <span class="label">On-Time Rate</span>
+              <span class="value">{{ formatPercentage(planVsActual()!.on_time_rate) }}</span>
+            </div>
+            <div class="metric">
+              <span class="label">Max Delay</span>
+              <span class="value">{{ planVsActual()!.max_delay_minutes }} min</span>
+            </div>
+            <div class="metric">
+              <span class="label">Avg Service Time</span>
+              <span class="value">{{ formatNumber(planVsActual()!.average_real_service_time, 1) }} min</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="breakdown-section">
+        <h4>By Driver</h4>
+        <table class="breakdown-table">
+          <thead>
+            <tr>
+              <th>Driver</th>
+              <th>Stops</th>
+              <th>On-Time %</th>
+              <th>Avg Delay (min)</th>
+              <th>Avg Service (min)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let driver of planVsActual()!.by_driver">
+              <td>{{ driver.name }}</td>
+              <td>{{ driver.stops_count }}</td>
+              <td>{{ formatPercentage(driver.on_time_rate) }}</td>
+              <td>{{ formatNumber(driver.average_delay_minutes, 1) }}</td>
+              <td>{{ formatNumber(driver.average_service_minutes, 1) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Costs Tab -->
+  <section *ngIf="selectedTab() === 'costs' && !loading() && !error()" class="tab-content">
+    <div *ngIf="costs()" class="costs-container">
+      <div class="cost-summary-grid">
+        <div class="cost-card">
+          <h4>Planned vs Actual</h4>
+          <div class="costs">
+            <p>
+              <span class="label">Planned:</span>
+              <span class="value">{{ formatCurrency(costs()!.total_planned_cost) }}</span>
+            </p>
+            <p>
+              <span class="label">Actual:</span>
+              <span class="value">{{ formatCurrency(costs()!.total_actual_cost) }}</span>
+            </p>
+            <p>
+              <span class="label">Variance:</span>
+              <span class="value" [class.positive]="costs()!.planned_vs_actual_variance >= 0">
+                {{ formatCurrency(costs()!.planned_vs_actual_variance) }}
+                ({{ formatPercentage(costs()!.planned_vs_actual_variance_percent) }})
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <div class="cost-card">
+          <h4>Cost Breakdown</h4>
+          <div class="costs">
+            <p>
+              <span class="label">Fuel Cost:</span>
+              <span class="value">{{ formatCurrency(costs()!.fuel_cost_actual) }}</span>
+            </p>
+            <p>
+              <span class="label">Driver Cost:</span>
+              <span class="value">{{ formatCurrency(costs()!.driver_cost_actual) }}</span>
+            </p>
+            <p>
+              <span class="label">Amortization:</span>
+              <span class="value">{{ formatCurrency(costs()!.amortization_cost) }}</span>
+            </p>
+          </div>
+        </div>
+
+        <div class="cost-card">
+          <h4>Cost per Unit</h4>
+          <div class="costs">
+            <p>
+              <span class="label">Per Trip:</span>
+              <span class="value">{{ formatCurrency(costs()!.cost_per_trip) }}</span>
+            </p>
+            <p>
+              <span class="label">Per Order:</span>
+              <span class="value">{{ formatCurrency(costs()!.cost_per_order) }}</span>
+            </p>
+            <p>
+              <span class="label">Per km:</span>
+              <span class="value">{{ formatCurrency(costs()!.cost_per_km) }}</span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="top-expensive-trips">
+        <h4>Top 10 Most Expensive Trips</h4>
+        <table class="trips-table">
+          <thead>
+            <tr>
+              <th>Trip ID</th>
+              <th>Planned km</th>
+              <th>Orders</th>
+              <th>Total Cost</th>
+              <th>Cost per Order</th>
+              <th>Recommendation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let trip of costs()!.top_expensive_trips">
+              <td>{{ trip.trip_id }}</td>
+              <td>{{ formatNumber(trip.planned_km, 2) }}</td>
+              <td>{{ trip.orders_count }}</td>
+              <td>{{ formatCurrency(trip.total_cost) }}</td>
+              <td>{{ formatCurrency(trip.cost_per_order) }}</td>
+              <td class="recommendation">{{ trip.recommendation }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Incidents Tab -->
+  <section *ngIf="selectedTab() === 'incidents' && !loading() && !error()" class="tab-content">
+    <div class="incidents-container">
+      <p class="info-message">Incident impact analytics will be displayed here once data is loaded.</p>
+    </div>
+  </section>
+</div>
