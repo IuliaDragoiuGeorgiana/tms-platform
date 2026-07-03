@@ -37,9 +37,14 @@ export class Trips implements OnInit, OnDestroy {
   completingStopId = '';
   failingStopId = '';
   selectedFailStop: TripStopResponse | null = null;
+  selectedCompletionStop: TripStopResponse | null = null;
   failStopReason = 'ABSENT';
   failStopNotes = '';
+  failStopActualKm = '';
+  actualKmInput = '';
+  actualKmError = '';
   isFailStopOpen = false;
+  isActualKmOpen = false;
   isEditTripOpen = false;
   isSavingTrip = false;
   tripsError = '';
@@ -385,23 +390,96 @@ export class Trips implements OnInit, OnDestroy {
   }
 
   completeStop(stop: TripStopResponse): void {
-    const trip = this.selectedTrip;
+    if (!this.selectedTrip || !this.canCompleteStop(stop)) {
+      return;
+    }
 
+    if (this.willFinishTrip(stop) && this.selectedTrip.actual_km === null) {
+      this.selectedCompletionStop = stop;
+      this.actualKmInput = '';
+      this.actualKmError = '';
+      this.isActualKmOpen = true;
+      this.lockBackgroundScroll();
+      this.changeDetectorRef.detectChanges();
+      return;
+    }
+
+    this.executeCompleteStop(stop);
+  }
+
+  willFinishTrip(stop: TripStopResponse): boolean {
+    const remaining = this.selectedTripStops.filter((candidate) => {
+      if (candidate.status !== 'PENDING' || candidate.id === stop.id) {
+        return false;
+      }
+
+      const skippedByFailedPickup =
+        stop.stop_type === 'PICKUP' &&
+        candidate.order_id === stop.order_id &&
+        candidate.stop_type === 'DELIVERY';
+
+      return !skippedByFailedPickup;
+    });
+
+    return remaining.length === 0;
+  }
+
+  closeActualKmWindow(): void {
+    if (this.completingStopId) {
+      return;
+    }
+
+    this.isActualKmOpen = false;
+    this.selectedCompletionStop = null;
+    this.actualKmInput = '';
+    this.actualKmError = '';
+    this.unlockBackgroundScroll();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  updateActualKm(value: string): void {
+    this.actualKmInput = value;
+    this.actualKmError = '';
+    this.changeDetectorRef.detectChanges();
+  }
+
+  submitFinalStop(): void {
+    const stop = this.selectedCompletionStop;
+    const actualKm = Number(this.actualKmInput);
+
+    if (!stop || !Number.isFinite(actualKm) || actualKm <= 0) {
+      this.actualKmError = 'trips.actual_km_invalid';
+      this.changeDetectorRef.detectChanges();
+      return;
+    }
+
+    this.executeCompleteStop(stop, actualKm);
+  }
+
+  private executeCompleteStop(stop: TripStopResponse, actualKm?: number): void {
+    const trip = this.selectedTrip;
     if (!trip || !this.canCompleteStop(stop)) {
       return;
     }
 
     this.completingStopId = stop.id;
     this.stopsError = '';
+    this.actualKmError = '';
     this.tripActionSuccess = '';
     this.changeDetectorRef.detectChanges();
 
-    this.tripService.completeStop(trip.id, stop.id).subscribe({
+    this.tripService.completeStop(trip.id, stop.id, { actual_km: actualKm }).subscribe({
       next: (updatedStop) => {
         this.selectedTripStops = this.selectedTripStops.map((currentStop) =>
           currentStop.id === updatedStop.id ? updatedStop : currentStop,
         );
         this.tripActionSuccess = 'trips.complete_success';
+        if (this.isActualKmOpen) {
+          this.isActualKmOpen = false;
+          this.selectedCompletionStop = null;
+          this.actualKmInput = '';
+          this.unlockBackgroundScroll();
+        }
         this.refreshSelectedTripAfterStopAction(trip.id, () => {
           this.completingStopId = '';
         });
@@ -422,6 +500,7 @@ export class Trips implements OnInit, OnDestroy {
     this.selectedFailStop = stop;
     this.failStopReason = 'ABSENT';
     this.failStopNotes = '';
+    this.failStopActualKm = '';
     this.stopsError = '';
     this.tripActionSuccess = '';
     this.isFailStopOpen = true;
@@ -434,6 +513,7 @@ export class Trips implements OnInit, OnDestroy {
     this.selectedFailStop = null;
     this.failStopReason = 'ABSENT';
     this.failStopNotes = '';
+    this.failStopActualKm = '';
     this.failingStopId = '';
     this.unlockBackgroundScroll();
     this.changeDetectorRef.detectChanges();
@@ -449,11 +529,25 @@ export class Trips implements OnInit, OnDestroy {
     this.changeDetectorRef.detectChanges();
   }
 
+  updateFailStopActualKm(value: string): void {
+    this.failStopActualKm = value;
+    this.stopsError = '';
+    this.changeDetectorRef.detectChanges();
+  }
+
   submitFailStop(): void {
     const trip = this.selectedTrip;
     const stop = this.selectedFailStop;
 
     if (!trip || !stop || !this.canFailStop(stop)) {
+      return;
+    }
+
+    const finishesTrip = this.willFinishTrip(stop);
+    const actualKm = Number(this.failStopActualKm);
+    if (finishesTrip && (!Number.isFinite(actualKm) || actualKm <= 0)) {
+      this.stopsError = 'trips.actual_km_invalid';
+      this.changeDetectorRef.detectChanges();
       return;
     }
 
@@ -466,6 +560,7 @@ export class Trips implements OnInit, OnDestroy {
       .failStop(trip.id, stop.id, {
         failure_reason: this.failStopReason,
         notes: this.failStopNotes.trim() || null,
+        actual_km: finishesTrip ? actualKm : null,
       })
       .subscribe({
         next: () => {
@@ -529,6 +624,7 @@ export class Trips implements OnInit, OnDestroy {
     this.isEditTripOpen = true;
     this.lockBackgroundScroll();
     this.changeDetectorRef.detectChanges();
+    this.loadOptions();
   }
 
   closeEditTrip(): void {
@@ -647,7 +743,15 @@ export class Trips implements OnInit, OnDestroy {
   }
 
   getStopAddress(stop: TripStopResponse): string {
-    return stop.address ?? stop.order_id;
+    return stop.address ?? stop.order_ref ?? stop.order_id;
+  }
+
+  getOrderLabel(stop: TripStopResponse): string {
+    return stop.order_ref ?? `Order ${stop.order_id.substring(0, 8)}`;
+  }
+
+  getTripLabel(trip: TripResponse): string {
+    return `Trip ${trip.planned_date}`;
   }
 
   private lockBackgroundScroll(): void {

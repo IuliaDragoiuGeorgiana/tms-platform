@@ -55,7 +55,7 @@
         >
           <div>
             <strong>{{ trip.planned_date }}</strong>
-            <span>{{ trip.id }}</span>
+            <span>{{ getTripLabel(trip) }}</span>
           </div>
 
           <div class="trip-row-meta">
@@ -177,7 +177,7 @@
         <article class="stop-row" [class.stop-row-disabled]="isStopDisabled(stop)">
           <strong>#{{ stop.sequence }}</strong>
           <div>
-            <span>{{ getStopTypeKey(stop.stop_type) | translate }}</span>
+            <span>{{ getStopTypeKey(stop.stop_type) | translate }} – {{ getOrderLabel(stop) }}</span>
             <small>{{ getStopAddress(stop) }}</small>
           </div>
           <span>{{ getStopStatusKey(stop.status) | translate }}</span>
@@ -243,6 +243,31 @@
     </aside>
   </div>
 
+  @if (isActualKmOpen) {
+  <div class="modal-backdrop" (click)="closeActualKmWindow()"></div>
+  <section class="trip-modal" role="dialog" aria-modal="true" [attr.aria-label]="'trips.actual_km_title' | translate" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <h2>{{ 'trips.actual_km_title' | translate }}</h2>
+        <p>{{ 'trips.actual_km_description' | translate }}</p>
+      </div>
+      <button type="button" class="row-action" [disabled]="!!completingStopId" (click)="closeActualKmWindow()">{{ 'orders.close' | translate }}</button>
+    </div>
+    @if (actualKmError) {
+    <div class="alert alert-error">{{ actualKmError | translate }}</div>
+    }
+    <div class="fail-stop-form">
+      <label>
+        <span>{{ 'trips.actual_km_label' | translate }}</span>
+        <input type="number" min="0.1" step="0.1" [value]="actualKmInput" [disabled]="!!completingStopId" [placeholder]="'trips.actual_km_placeholder' | translate" (input)="updateActualKm($any($event.target).value)" />
+      </label>
+    </div>
+    <button type="button" class="primary-action fail-primary-action" [disabled]="!!completingStopId" (click)="submitFinalStop()">
+      {{ (completingStopId ? 'trips.completing' : 'trips.actual_km_confirm') | translate }}
+    </button>
+  </section>
+  }
+
   @if (isFailStopOpen) {
   <div class="modal-backdrop" (click)="closeFailStop()"></div>
 
@@ -286,6 +311,21 @@
           (input)="updateFailStopNotes($any($event.target).value)"
         ></textarea>
       </label>
+
+      @if (selectedFailStop && willFinishTrip(selectedFailStop)) {
+      <label>
+        <span>{{ 'trips.actual_km_label' | translate }}</span>
+        <input
+          type="number"
+          min="0.1"
+          step="0.1"
+          [value]="failStopActualKm"
+          [disabled]="!!failingStopId"
+          [placeholder]="'trips.actual_km_placeholder' | translate"
+          (input)="updateFailStopActualKm($any($event.target).value)"
+        />
+      </label>
+      }
     </div>
 
     <button
@@ -312,7 +352,7 @@
     <div class="modal-header">
       <div>
         <h2>{{ 'trips.edit_title' | translate }}</h2>
-        <p>{{ selectedTrip?.id }}</p>
+        <p>{{ selectedTrip ? getTripLabel(selectedTrip) : '' }}</p>
       </div>
       <button type="button" class="row-action" (click)="closeEditTrip()">
         {{ 'orders.close' | translate }}

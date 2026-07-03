@@ -145,14 +145,13 @@
         <article class="planning-row">
           <div>
             <span>{{ trip.status }}</span>
-            <h3>{{ 'planning.trip_date' | translate }}: {{ trip.planned_date }}</h3>
-            <p>{{ 'planning.trip_id' | translate }}: {{ trip.id }}</p>
+            <p>{{ getTripLabel(trip) }}</p>
           </div>
           <div class="planning-row-meta">
             <strong>{{ trip.planned_km ?? 0 }} km</strong>
             <span>{{ trip.planned_duration_min ?? 0 }} {{ 'planning.minutes_short' | translate }}</span>
-            <span>{{ 'planning.driver' | translate }}: {{ getDriverLabel(trip.driver_id) | translate }}</span>
-            <span>{{ 'planning.vehicle' | translate }}: {{ getVehicleLabel(trip.vehicle_id) | translate }}</span>
+            <span>{{ 'planning.driver' | translate }}: {{ getTripDriverLabel(trip) }}</span>
+            <span>{{ 'planning.vehicle' | translate }}: {{ getTripVehicleLabel(trip) }}</span>
             <button
               type="button"
               style="justify-self: end; margin-top: 8px; border: 1px solid var(--color-primary); border-radius: 8px; padding: 8px 10px; background: var(--color-primary); color: white; cursor: pointer; font-weight: 800;"
@@ -430,7 +429,7 @@
     <div class="panel-header">
       <div>
         <h2>{{ 'planning.edit_trip_title' | translate }}</h2>
-        <p>{{ 'planning.trip_id' | translate }}: {{ trip.id }}</p>
+        <p>{{ selectedEditTrip ? getTripLabel(selectedEditTrip) : '' }}</p>
       </div>
       <button type="button" class="planning-action-primary" style="border: 1px solid var(--color-border); border-radius: 8px; padding: 10px 12px; cursor: pointer;" (click)="closeEditTrip()">
         {{ 'orders.close' | translate }}
@@ -502,7 +501,7 @@
           @for (orderId of getTripOrderIds(); track orderId) {
           <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface);">
             <div style="display: grid; gap: 4px;">
-              <strong>{{ orderId }}</strong>
+              <strong>{{ getOrderRef(orderId) }}</strong>
               <span style="color: var(--color-text-muted);">{{ getTripOrderStopSummary(orderId) }}</span>
             </div>
             <div style="display: flex; gap: 8px; justify-content: flex-end;">
@@ -700,6 +699,7 @@
           @for (trip of variant.trips; track trip.vehicle_plate + '-' + trip.driver + '-' + $index; let tripIndex = $index) {
           <span style="display: grid; gap: 5px; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface);">
             <strong>{{ 'planning.compare.trip' | translate }} {{ tripIndex + 1 }}</strong>
+            <span style="color: var(--color-text-muted);">{{ trip.planned_date }}</span>
             <span style="color: var(--color-text-muted);">{{ 'planning.compare.driver' | translate }}: {{ trip.driver_name || trip.driver || ('vehicles.not_available' | translate) }}</span>
             <span style="color: var(--color-text-muted);">{{ 'planning.compare.vehicle' | translate }}: {{ trip.vehicle_plate || ('vehicles.not_available' | translate) }}</span>
             <span style="color: var(--color-text-muted);">{{ 'planning.compare.included_orders' | translate }}: {{ getTripOrders(trip).join(', ') || ('planning.compare.no_orders' | translate) }}</span>

@@ -316,6 +316,212 @@
       }
     </div>
   </div>
+  } @else if (isClientDashboard) {
+    <div class="client-dashboard">
+      <header class="client-hero">
+        <div class="client-hero__copy">
+          <span class="eyebrow">{{ dashboard.eyebrow | translate }}</span>
+          <h1>{{ dashboard.title | translate }}</h1>
+          <p>{{ dashboard.description | translate }}</p>
+        </div>
+
+        <div class="client-hero__actions">
+          <a routerLink="/orders" class="client-button client-button--primary">
+            <app-icon name="clipboard-list" />
+            {{ 'dashboard.client.create_order' | translate }}
+          </a>
+          <a routerLink="/tracking" class="client-button client-button--secondary">
+            <app-icon name="map-pin" />
+            {{ 'dashboard.client.track_order' | translate }}
+          </a>
+        </div>
+      </header>
+
+      @if (isLoadingClientDashboard) {
+        <div class="client-loading" aria-live="polite">
+          <span class="client-loading__spinner"></span>
+          <div>
+            <strong>{{ 'dashboard.client.loading' | translate }}</strong>
+            <small>{{ 'dashboard.client.loading_hint' | translate }}</small>
+          </div>
+        </div>
+      } @else if (clientDashboardError) {
+        <div class="client-error" role="alert">
+          <app-icon name="alert-triangle" />
+          <div>
+            <strong>{{ clientDashboardError | translate }}</strong>
+            <span>{{ 'dashboard.client.load_error_hint' | translate }}</span>
+          </div>
+          <button type="button" (click)="loadClientDashboard()">
+            {{ 'dashboard.client.retry' | translate }}
+          </button>
+        </div>
+      } @else {
+        <section
+          class="client-kpi-grid"
+          [attr.aria-label]="'dashboard.client.overview' | translate"
+        >
+          <article class="client-kpi client-kpi--active">
+            <span class="client-kpi__icon"><app-icon name="clipboard-list" /></span>
+            <div>
+              <small>{{ 'dashboard.client.active_orders' | translate }}</small>
+              <strong>{{ clientActiveOrders }}</strong>
+              <span>{{ 'dashboard.client.active_orders_hint' | translate }}</span>
+            </div>
+          </article>
+          <article class="client-kpi client-kpi--transit">
+            <span class="client-kpi__icon"><app-icon name="truck" /></span>
+            <div>
+              <small>{{ 'dashboard.client.in_delivery' | translate }}</small>
+              <strong>{{ clientInDeliveryOrders }}</strong>
+              <span>{{ 'dashboard.client.in_delivery_hint' | translate }}</span>
+            </div>
+          </article>
+          <article class="client-kpi client-kpi--delivered">
+            <span class="client-kpi__icon"><app-icon name="route" /></span>
+            <div>
+              <small>{{ 'dashboard.client.delivered' | translate }}</small>
+              <strong>{{ clientDeliveredOrders }}</strong>
+              <span>{{ 'dashboard.client.delivered_hint' | translate }}</span>
+            </div>
+          </article>
+          <article class="client-kpi client-kpi--attention">
+            <span class="client-kpi__icon"><app-icon name="alert-triangle" /></span>
+            <div>
+              <small>{{ 'dashboard.client.attention' | translate }}</small>
+              <strong>{{ clientAttentionOrders }}</strong>
+              <span>{{ 'dashboard.client.attention_hint' | translate }}</span>
+            </div>
+          </article>
+        </section>
+
+        @if (clientOrders.length === 0) {
+          <section class="client-empty">
+            <span class="client-empty__icon"><app-icon name="truck" /></span>
+            <h2>{{ 'dashboard.client.empty_title' | translate }}</h2>
+            <p>{{ 'dashboard.client.empty_description' | translate }}</p>
+            <a routerLink="/orders" class="client-button client-button--primary">
+              {{ 'dashboard.client.first_order' | translate }}
+            </a>
+          </section>
+        } @else {
+          <div class="client-content-grid">
+            <section class="client-panel client-next-delivery">
+              <div class="client-panel__header">
+                <div>
+                  <span class="eyebrow">{{ 'dashboard.client.next_label' | translate }}</span>
+                  <h2>{{ 'dashboard.client.next_delivery' | translate }}</h2>
+                </div>
+                @if (clientNextDelivery) {
+                  <span class="client-status" [class]="orderStatusClass(clientNextDelivery.status)">
+                    {{ orderStatusKey(clientNextDelivery.status) | translate }}
+                  </span>
+                }
+              </div>
+
+              @if (clientNextDelivery; as order) {
+                <div class="client-next-delivery__route">
+                  <span class="route-marker route-marker--start"></span>
+                  <div>
+                    <small>{{ 'dashboard.client.pickup' | translate }}</small>
+                    <strong>{{ order.pickup_city || order.address_pickup }}</strong>
+                  </div>
+                  <span class="route-line"><i [style.width.%]="clientDeliveryProgress"></i></span>
+                  <span class="route-marker route-marker--end"></span>
+                  <div>
+                    <small>{{ 'dashboard.client.destination' | translate }}</small>
+                    <strong>{{ order.delivery_city || order.address_delivery }}</strong>
+                  </div>
+                </div>
+
+                <div class="client-next-delivery__footer">
+                  <div>
+                    <small>{{ 'dashboard.client.order' | translate }}</small>
+                    <strong>{{ order.order_ref }}</strong>
+                  </div>
+                  <div>
+                    <small>{{ 'dashboard.client.deadline' | translate }}</small>
+                    <strong>{{ formatClientDate(order.delivery_deadline) }}</strong>
+                  </div>
+                  <div>
+                    <small>{{ 'dashboard.client.cargo' | translate }}</small>
+                    <strong
+                      >{{ order.kg | number: '1.0-1' }} kg &middot;
+                      {{ order.m3 | number: '1.0-1' }} m&sup3;</strong
+                    >
+                  </div>
+                </div>
+              } @else {
+                <div class="client-next-delivery__complete">
+                  <app-icon name="route" />
+                  <div>
+                    <strong>{{ 'dashboard.client.no_upcoming' | translate }}</strong>
+                    <span>{{ 'dashboard.client.no_upcoming_hint' | translate }}</span>
+                  </div>
+                </div>
+              }
+            </section>
+
+            <aside class="client-panel client-quick-links">
+              <div class="client-panel__header">
+                <h2>{{ 'dashboard.client.quick_actions' | translate }}</h2>
+              </div>
+              <a routerLink="/orders">
+                <span><app-icon name="clipboard-list" /></span>
+                <div>
+                  <strong>{{ 'dashboard.client.all_orders' | translate }}</strong>
+                  <small>{{ 'dashboard.client.all_orders_hint' | translate }}</small>
+                </div>
+                <b aria-hidden="true">&rarr;</b>
+              </a>
+              <a routerLink="/tracking">
+                <span><app-icon name="map-pin" /></span>
+                <div>
+                  <strong>{{ 'dashboard.client.public_tracking' | translate }}</strong>
+                  <small>{{ 'dashboard.client.public_tracking_hint' | translate }}</small>
+                </div>
+                <b aria-hidden="true">&rarr;</b>
+              </a>
+            </aside>
+          </div>
+
+          <section class="client-panel client-orders-panel">
+            <div class="client-panel__header">
+              <div>
+                <h2>{{ 'dashboard.client.recent_orders' | translate }}</h2>
+                <p>{{ 'dashboard.client.recent_orders_hint' | translate }}</p>
+              </div>
+              <a routerLink="/orders">{{ 'dashboard.client.view_all' | translate }} &rarr;</a>
+            </div>
+
+            <div class="client-order-list">
+              @for (order of clientRecentOrders; track order.id) {
+                <a routerLink="/orders" class="client-order-row">
+                  <div class="client-order-row__identity">
+                    <span><app-icon name="truck" /></span>
+                    <div>
+                      <strong>{{ order.order_ref }}</strong>
+                      <small>{{ orderRoute(order) }}</small>
+                    </div>
+                  </div>
+                  <div class="client-order-row__deadline">
+                    <small>{{ 'dashboard.client.deadline' | translate }}</small>
+                    <strong>{{ formatClientDate(order.delivery_deadline) }}</strong>
+                  </div>
+                  <div class="client-order-row__progress">
+                    <span><i [style.width.%]="orderProgress(order.status)"></i></span>
+                    <small>{{ orderProgress(order.status) }}%</small>
+                  </div>
+                  <span class="client-status" [class]="orderStatusClass(order.status)">
+                    {{ orderStatusKey(order.status) | translate }}
+                  </span>
+                </a>
+              }
+            </div>
+          </section>
+        }
+      }
+    </div>
   } @else {
   <div class="dashboard-header">
     <div>

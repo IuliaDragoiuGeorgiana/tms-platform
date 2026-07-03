@@ -65,17 +65,11 @@
           <div *ngFor="let zone of zoneDemand()!.zones.slice(0, 5)" class="zone-item">
             <div class="zone-header">
               <span class="zone-name">{{ zone.zone }}</span>
-              <span class="zone-score" [style.color]="getDemandColor(zone.demand_level)">
-                {{ zone.zone_demand_score }}
-              </span>
             </div>
             <p class="zone-meta">
-              {{ zone.orders_count }} {{ 'analytics.orders_lower' | translate }} |
-              {{ ('analytics.demand_level.' + zone.demand_level) | translate }}
+              {{ zone.orders_count }} {{ 'analytics.orders_lower' | translate }}
+              · {{ zone.delivered_orders }} {{ 'analytics.delivered' | translate | lowercase }}
             </p>
-            <div class="progress-bar">
-              <div class="progress-fill" [style.width.%]="zone.zone_demand_score"></div>
-            </div>
           </div>
         </div>
       </div>
@@ -86,19 +80,28 @@
         <div class="stats-grid">
           <div class="stat">
             <span class="label">{{ 'analytics.used_vehicles' | translate }}</span>
-            <span class="value">{{ fleetUtilization()!.summary.used_vehicles }}</span>
+            <span class="value">{{ fleetUtilization()!.summary.used_vehicles }} / {{ fleetUtilization()!.summary.used_vehicles + fleetUtilization()!.summary.unused_vehicles }}</span>
           </div>
           <div class="stat">
-            <span class="label">{{ 'analytics.avg_load_kg' | translate }}</span>
-            <span class="value">{{ formatPercentage(fleetUtilization()!.summary.average_load_kg_percent) }}</span>
-          </div>
-          <div class="stat">
-            <span class="label">{{ 'analytics.avg_load_m3' | translate }}</span>
-            <span class="value">{{ formatPercentage(fleetUtilization()!.summary.average_load_m3_percent) }}</span>
+            <span class="label">{{ 'analytics.average_load' | translate }}</span>
+            <div class="load-values">
+              <span class="load-value">
+                <strong>{{ formatPercentage(fleetUtilization()!.summary.average_load_kg_percent) }}</strong>
+                <small>kg</small>
+              </span>
+              <span class="load-value">
+                <strong>{{ formatPercentage(fleetUtilization()!.summary.average_load_m3_percent) }}</strong>
+                <small>m³</small>
+              </span>
+            </div>
           </div>
           <div class="stat">
             <span class="label">{{ 'analytics.efficient_trips' | translate }}</span>
-            <span class="value">{{ fleetUtilization()!.summary.efficient_trips }}</span>
+            <span class="value">{{ fleetUtilization()!.summary.efficient_trips }} / {{ fleetUtilization()!.summary.capacity_compliant_trips }}</span>
+          </div>
+          <div class="stat">
+            <span class="label">{{ 'analytics.near_capacity_trips' | translate }}</span>
+            <span class="value">{{ fleetUtilization()!.summary.near_capacity_trips }}</span>
           </div>
         </div>
       </div>
@@ -139,6 +142,10 @@
             <span class="value">{{ formatCurrency(costs()!.cost_per_order) }}</span>
           </div>
           <div class="stat">
+            <span class="label">{{ 'analytics.total_actual_km' | translate }}</span>
+            <span class="value">{{ costs()!.total_actual_km | number: '1.0-2' }} km</span>
+          </div>
+          <div class="stat">
             <span class="label">{{ 'analytics.cost_per_km' | translate }}</span>
             <span class="value">{{ formatCurrency(costs()!.cost_per_km) }}</span>
           </div>
@@ -160,9 +167,6 @@
         <div *ngFor="let zone of zoneDemand()!.zones" class="zone-card">
           <div class="card-header">
             <h4>{{ zone.zone }}</h4>
-            <span class="score-badge" [style.background-color]="getDemandColor(zone.demand_level)">
-              {{ zone.zone_demand_score }}
-            </span>
           </div>
 
           <div class="zone-metrics">

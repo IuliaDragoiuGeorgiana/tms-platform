@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from pydantic import BaseModel, Field
 
@@ -60,6 +60,7 @@ class RecoveryOptionResponse(BaseModel):
     """Opțiune de recovery cu valori reale calculate."""
     option_id: str
     type: str
+    planned_date: date | None = None
     feasible: bool
     recommended: bool
     driver_id: str | None

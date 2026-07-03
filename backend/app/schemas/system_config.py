@@ -46,3 +46,20 @@ class UpdateServiceTimeConfigRequest(BaseModel):
             raise ValueError("Valorile de configurare nu pot depăși 240 minute")
 
         return value
+
+class CostConfigResponse(BaseModel):
+    fuel_price_per_liter: float
+    driver_hourly_rate: float
+    vehicle_daily_amortization: float
+    vehicle_consumption_van: float
+    vehicle_consumption_truck: float
+    vehicle_consumption_car: float
+
+
+class UpdateCostConfigRequest(CostConfigResponse):
+    @field_validator("*")
+    @classmethod
+    def positive_values(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("Valorile de cost trebuie să fie pozitive")
+        return value

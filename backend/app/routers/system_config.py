@@ -6,10 +6,13 @@ from app.dependencies import require_roles
 from app.models.user import User
 from app.models.system_config import SystemConfig, ConfigDataTypeEnum
 from app.schemas.system_config import (
+    CostConfigResponse,
     ServiceTimeConfigResponse,
+    UpdateCostConfigRequest,
     UpdateServiceTimeConfigRequest,
 )
 from app.services.service_time_service import DEFAULT_CONFIG
+from app.services.trip_cost_service import DEFAULT_COST_CONFIG, get_cost_config_value
 
 
 router = APIRouter(prefix="/system-config", tags=["System Config"])
@@ -111,3 +114,50 @@ def update_service_time_config(
     }
 
     return ServiceTimeConfigResponse(**values)
+
+@router.get("/costs", response_model=CostConfigResponse)
+def get_cost_config(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("MANAGER")),
+):
+    values = {
+        key: float(get_cost_config_value(db, current_user.company_id, key))
+        for key in DEFAULT_COST_CONFIG
+    }
+    return CostConfigResponse(**values)
+
+
+@router.put("/costs", response_model=CostConfigResponse)
+def update_cost_config(
+    data: UpdateCostConfigRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("MANAGER")),
+):
+    for key, value in data.model_dump().items():
+        config = (
+            db.query(SystemConfig)
+            .filter(
+                SystemConfig.company_id == current_user.company_id,
+                SystemConfig.key == key,
+            )
+            .first()
+        )
+        if config:
+            config.value = str(value)
+            config.data_type = ConfigDataTypeEnum.DECIMAL
+            config.updated_by = current_user.id
+        else:
+            db.add(SystemConfig(
+                company_id=current_user.company_id,
+                key=key,
+                value=str(value),
+                data_type=ConfigDataTypeEnum.DECIMAL,
+                description=f"Trip cost configuration: {key}",
+                updated_by=current_user.id,
+            ))
+    db.commit()
+    values = {
+        key: float(get_cost_config_value(db, current_user.company_id, key))
+        for key in DEFAULT_COST_CONFIG
+    }
+    return CostConfigResponse(**values)

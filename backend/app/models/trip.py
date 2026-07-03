@@ -56,7 +56,12 @@ class Trip(UUIDPrimaryKey, TimestampMixin, Base):
     back_populates="trip",
     foreign_keys="Incident.trip_id",
     )
-    cost = relationship("TripCost", back_populates="trip", uselist=False)
+    cost = relationship(
+        "TripCost",
+        back_populates="trip",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     chat_messages = relationship("ChatMessage", back_populates="trip")
 
     def __repr__(self) -> str:

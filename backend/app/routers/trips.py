@@ -18,6 +18,7 @@ from app.schemas.trip import (
     TripResponse,
     TripStopResponse,
 )
+from app.services.trip_cost_service import upsert_trip_cost
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -111,12 +112,20 @@ def _complete_trip_if_no_pending_stops(trip: Trip, db: Session) -> None:
     if pending_stops > 0:
         return
 
+    if trip.actual_km is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Kilometrii reali sunt obligatorii la finalizarea cursei.",
+        )
+
     trip.status = TripStatusEnum.COMPLETED
     trip.completed_at = datetime.now(timezone.utc)
 
     if trip.started_at:
         duration = trip.completed_at - trip.started_at
         trip.actual_duration_min = int(duration.total_seconds() / 60)
+
+    upsert_trip_cost(db, trip)
 
 
 # ==========================================
@@ -459,6 +468,8 @@ def complete_stop(
     stop.status = StopStatusEnum.COMPLETED
     stop.departure_time = datetime.now(timezone.utc)
     stop.notes = data.notes
+    if data.actual_km is not None:
+        trip.actual_km = data.actual_km
 
     # Doar la DELIVERY marcăm întreaga comandă ca livrată.
     if stop.stop_type == StopTypeEnum.DELIVERY:
@@ -563,6 +574,8 @@ def fail_stop(
     stop.failure_reason = failure_reason
     stop.notes = data.notes
     stop.departure_time = datetime.now(timezone.utc)
+    if data.actual_km is not None:
+        trip.actual_km = data.actual_km
 
     if not stop.arrival_time:
         stop.arrival_time = datetime.now(timezone.utc)

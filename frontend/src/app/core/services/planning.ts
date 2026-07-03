@@ -132,6 +132,7 @@ export interface StrategyTripStopPreview {
 
 export interface StrategyTripPreview {
   trip_id?: string | null;
+  planned_date?: string | null;
   driver_id?: string | null;
   driver?: string | null;
   driver_name?: string | null;

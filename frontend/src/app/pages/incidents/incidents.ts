@@ -211,6 +211,14 @@ export class Incidents implements OnInit {
     return [...refs];
   }
 
+  originalTripOrderRefs(): string[] {
+    if (!this.impactAnalysis || this.impactAnalysis.options.length === 0) {
+      return [];
+    }
+
+    return this.routeOrderRefs(this.impactAnalysis.options[0]);
+  }
+
   formatDate(value: string | null): string {
     if (!value) {
       return '-';

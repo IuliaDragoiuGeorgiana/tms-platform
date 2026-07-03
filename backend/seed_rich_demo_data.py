@@ -50,6 +50,7 @@ from app.models.trip_stop import (
 )
 from app.models.user import RoleEnum, User
 from app.models.vehicle import FuelTypeEnum, Vehicle, VehicleStatusEnum, VehicleTypeEnum
+from app.services.trip_cost_service import upsert_trip_cost
 
 
 PASSWORD = "helloWorld"
@@ -79,6 +80,7 @@ COMPANY_SCENARIOS = [
         "plan": PlanEnum.PRO,
         "depot": ("Bucuresti", "Bucuresti", "Soseaua Industriilor", "42", 44.4268, 26.1025),
         "plate_prefix": "B",
+        "available_drivers": 3,
         "zones": [
             ("Bucuresti", "Bucuresti", 44.4268, 26.1025),
             ("Ilfov", "Otopeni", 44.5500, 26.0667),
@@ -128,6 +130,58 @@ def dt(day_offset: int, hour: int, minute: int = 0) -> datetime:
 def unique_token(seed: str) -> str:
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
     return f"demo-{digest}"
+
+
+def select_vehicle_for_orders(orders: list[Order], vehicles: list[Vehicle], fallback_index: int = 0) -> Vehicle:
+    """
+    Select the most appropriate vehicle for a set of orders.
+    - Finds vehicles that can accommodate all orders
+    - Rotates through suitable vehicles to distribute load across fleet
+    - Falls back to any available vehicle if no perfect match
+
+    Args:
+        orders: List of Order objects to be transported
+        vehicles: List of available Vehicle objects to choose from
+        fallback_index: Index to use for rotation and fallback
+
+    Returns:
+        Selected Vehicle object
+    """
+    if not vehicles:
+        return None
+
+    # Calculate total weight and volume needed
+    total_kg = 0.0
+    total_m3 = 0.0
+    for order in orders:
+        kg = float(order.kg) if order.kg else 0.0
+        m3 = float(order.m3) if order.m3 else 0.0
+        total_kg += kg
+        total_m3 += m3
+
+    # Find vehicles that can accommodate these orders
+    suitable_vehicles = []
+    for vehicle in vehicles:
+        cap_kg = float(vehicle.capacity_kg) if vehicle.capacity_kg else 0.0
+        cap_m3 = float(vehicle.capacity_m3) if vehicle.capacity_m3 else 0.0
+
+        if cap_kg >= total_kg and cap_m3 >= total_m3:
+            suitable_vehicles.append({
+                "vehicle": vehicle,
+                "capacity_score": cap_kg + cap_m3,  # Prefer smaller vehicles
+            })
+
+    if suitable_vehicles:
+        # Sort by capacity (smallest suitable first)
+        suitable_vehicles.sort(key=lambda x: x["capacity_score"])
+
+        # Use fallback_index to rotate through suitable vehicles
+        # This distributes trips across multiple vehicles
+        selected_index = fallback_index % len(suitable_vehicles)
+        return suitable_vehicles[selected_index]["vehicle"]
+
+    # Fallback: return vehicle by index if no suitable vehicle found
+    return vehicles[fallback_index % len(vehicles)]
 
 
 def cleanup_database(db) -> None:
@@ -261,8 +315,10 @@ def create_order(
     flexibility_days = sequence % 4
     priority = priority_cycle[sequence % len(priority_cycle)]
     cargo_type = cargo_cycle[sequence % len(cargo_cycle)]
-    kg = 80 + (sequence % 18) * 135
-    m3 = 0.6 + (sequence % 10) * 1.15
+    # Realistic order weights: 80-320kg for balanced fleet utilization
+    # Volume scales with weight (typical density 150-250kg/m³)
+    kg = 80 + (sequence % 32) * 7.5
+    m3 = max(0.5, kg / 200 + (sequence % 10) * 0.08)
     pickup_service_minutes = 8 + sequence % 13
     delivery_service_minutes = 10 + sequence % 17
     is_problematic = sequence % 31 == 0
@@ -282,39 +338,43 @@ def create_order(
         problem_reason = None
 
         if local_sequence <= 8:
+            # Small urgent parcels - high priority
             priority = PriorityEnum.CRITIC if local_sequence % 2 else PriorityEnum.URGENT
             deadline_offset = 0 if local_sequence <= 5 else 1
             flexibility_days = 1
-            kg = 180 + (local_sequence % 5) * 90
-            m3 = 1.2 + (local_sequence % 4) * 0.6
+            kg = 120 + (local_sequence % 5) * 30  # 120-270kg
+            m3 = max(0.6, kg / 180 + (local_sequence % 3) * 0.1)
             pickup_service_minutes = 40
             delivery_service_minutes = 45
             cargo_type = MarfaTypeEnum.FRAGIL if local_sequence % 3 else MarfaTypeEnum.ADR
         elif local_sequence <= 20:
+            # Standard city work - normal priority
             priority = PriorityEnum.NORMAL
             deadline_offset = 2
             flexibility_days = 2
-            kg = 120 + (local_sequence % 6) * 55
-            m3 = 0.8 + (local_sequence % 5) * 0.4
+            kg = 100 + (local_sequence % 6) * 25  # 100-250kg
+            m3 = max(0.5, kg / 200 + (local_sequence % 3) * 0.05)
             pickup_service_minutes = 35
             delivery_service_minutes = 40
             cargo_type = MarfaTypeEnum.STANDARD
         elif local_sequence <= 26:
+            # Urgent/perishable items - higher priority
             priority = PriorityEnum.CRITIC if local_sequence % 3 == 0 else PriorityEnum.URGENT
             deadline_offset = 1
             flexibility_days = 1
-            kg = 160 + (local_sequence % 6) * 75
-            m3 = 1.0 + (local_sequence % 5) * 0.5
+            kg = 150 + (local_sequence % 6) * 30  # 150-330kg
+            m3 = max(0.8, kg / 180 + (local_sequence % 3) * 0.1)
             pickup_service_minutes = 45
             delivery_service_minutes = 45
             cargo_type = MarfaTypeEnum.PERISABIL
             was_postponed = local_sequence % 5 == 0
         else:
+            # Bulk consolidation orders
             priority = PriorityEnum.NORMAL if local_sequence % 3 else PriorityEnum.URGENT
             deadline_offset = 2
             flexibility_days = 2
-            kg = 950 + (local_sequence % 7) * 230
-            m3 = 6.5 + (local_sequence % 5) * 1.4
+            kg = 200 + (local_sequence % 7) * 50  # 200-550kg
+            m3 = max(1.0, kg / 200 + (local_sequence % 4) * 0.15)
             pickup_service_minutes = 75
             delivery_service_minutes = 80
             cargo_type = MarfaTypeEnum.STANDARD
@@ -372,7 +432,11 @@ def create_order(
         m3=m3,
         pickup_service_minutes=pickup_service_minutes,
         delivery_service_minutes=delivery_service_minutes,
-        service_time_source=ServiceTimeSourceEnum.AUTO,
+        service_time_source=(
+            ServiceTimeSourceEnum.MANUAL
+            if status == OrderStatusEnum.PENDING
+            else ServiceTimeSourceEnum.AUTO
+        ),
         type_marfa=cargo_type,
         priority=priority,
         delivery_deadline=TODAY + timedelta(days=deadline_offset),
@@ -415,8 +479,12 @@ def create_trip_with_orders(
         planning_session_id=planning_session.id,
         planned_date=planned_day,
         status=status,
-        planned_km=95 + trip_index * 17,
-        actual_km=(103 + trip_index * 19) if status == TripStatusEnum.COMPLETED else None,
+        planned_km=min(500, 95 + trip_index * 17),
+        actual_km=(
+            min(500, 103 + trip_index * 19)
+            if status == TripStatusEnum.COMPLETED
+            else None
+        ),
         planned_duration_min=260 + trip_index * 18,
         actual_duration_min=(278 + trip_index * 21) if status == TripStatusEnum.COMPLETED else None,
         started_at=dt((planned_day - TODAY).days, start_hour) if status != TripStatusEnum.PROPOSED else None,
@@ -426,14 +494,15 @@ def create_trip_with_orders(
     db.flush()
 
     sequence = 1
-    for order in orders:
-        pickup_eta = dt((planned_day - TODAY).days, start_hour, (sequence * 13) % 60)
-        delivery_eta = pickup_eta + timedelta(minutes=55 + sequence * 7)
+    # Realistic routing: create all PICKUP stops first (consolidation at depot), then DELIVERY stops (route delivery)
+    # This ensures peak load includes all orders on-board together during delivery phase
+
+    # Phase 1: All PICKUP stops (consolidation)
+    for idx, order in enumerate(orders):
+        pickup_eta = dt((planned_day - TODAY).days, start_hour, idx * 5)
         stop_status = StopStatusEnum.PENDING
         if status == TripStatusEnum.COMPLETED:
             stop_status = StopStatusEnum.COMPLETED
-        elif status == TripStatusEnum.INTERRUPTED and sequence > 3:
-            stop_status = StopStatusEnum.SKIPPED
 
         db.add(
             TripStop(
@@ -444,12 +513,23 @@ def create_trip_with_orders(
                 eta_planned=pickup_eta,
                 eta_actual=pickup_eta + timedelta(minutes=4) if stop_status == StopStatusEnum.COMPLETED else None,
                 arrival_time=pickup_eta + timedelta(minutes=2) if stop_status == StopStatusEnum.COMPLETED else None,
-                departure_time=pickup_eta + timedelta(minutes=16) if stop_status == StopStatusEnum.COMPLETED else None,
+                departure_time=pickup_eta + timedelta(minutes=8) if stop_status == StopStatusEnum.COMPLETED else None,
                 status=stop_status,
                 notes="Pickup confirmat" if stop_status == StopStatusEnum.COMPLETED else None,
             )
         )
         sequence += 1
+
+    # Phase 2: All DELIVERY stops (route delivery)
+    delivery_start = dt((planned_day - TODAY).days, start_hour + 1, 0)
+    for idx, order in enumerate(orders):
+        delivery_eta = delivery_start + timedelta(minutes=30 + idx * 15)
+        stop_status = StopStatusEnum.PENDING
+        if status == TripStatusEnum.COMPLETED:
+            stop_status = StopStatusEnum.COMPLETED
+        elif status == TripStatusEnum.INTERRUPTED and idx > len(orders) // 2:
+            stop_status = StopStatusEnum.SKIPPED
+
         db.add(
             TripStop(
                 trip_id=trip.id,
@@ -457,9 +537,9 @@ def create_trip_with_orders(
                 sequence=sequence,
                 stop_type=StopTypeEnum.DELIVERY,
                 eta_planned=delivery_eta,
-                eta_actual=delivery_eta + timedelta(minutes=8) if stop_status == StopStatusEnum.COMPLETED else None,
-                arrival_time=delivery_eta + timedelta(minutes=5) if stop_status == StopStatusEnum.COMPLETED else None,
-                departure_time=delivery_eta + timedelta(minutes=21) if stop_status == StopStatusEnum.COMPLETED else None,
+                eta_actual=delivery_eta + timedelta(minutes=5) if stop_status == StopStatusEnum.COMPLETED else None,
+                arrival_time=delivery_eta + timedelta(minutes=2) if stop_status == StopStatusEnum.COMPLETED else None,
+                departure_time=delivery_eta + timedelta(minutes=15) if stop_status == StopStatusEnum.COMPLETED else None,
                 status=stop_status,
                 failure_reason=FailureReasonEnum.OTHER if stop_status == StopStatusEnum.SKIPPED else None,
                 notes="Livrare finalizata" if stop_status == StopStatusEnum.COMPLETED else None,
@@ -468,19 +548,11 @@ def create_trip_with_orders(
         sequence += 1
 
     extra_cost = 250 if status == TripStatusEnum.INTERRUPTED else 0
-    db.add(
-        TripCost(
-            trip_id=trip.id,
-            fuel_cost_planned=420 + trip_index * 32,
-            fuel_cost_actual=(455 + trip_index * 35) if status == TripStatusEnum.COMPLETED else None,
-            driver_cost_planned=310 + trip_index * 20,
-            driver_cost_actual=(335 + trip_index * 22) if status == TripStatusEnum.COMPLETED else None,
-            amortization=160 + trip_index * 8,
-            extra_cost=extra_cost,
-            extra_reason="Incident rutier" if extra_cost else None,
-            total_planned=890 + trip_index * 60,
-            total_actual=(950 + trip_index * 67 + extra_cost) if status == TripStatusEnum.COMPLETED else None,
-        )
+    upsert_trip_cost(
+        db,
+        trip,
+        extra_cost=extra_cost,
+        extra_reason="Incident rutier" if extra_cost else None,
     )
     return trip
 
@@ -568,21 +640,26 @@ def create_historical_kpi_data(
 
     historical_trips = []
     for trip_idx in range(6):
-        trip_orders = delivered_orders[trip_idx * 3: trip_idx * 3 + 3]
+        # Use 6-8 orders per historical trip for realistic utilization
+        start_idx = trip_idx * 7
+        end_idx = min(start_idx + 7, len(delivered_orders))
+        trip_orders = delivered_orders[start_idx:end_idx]
         if not trip_orders:
             continue
 
         planned_day = TODAY - timedelta(days=trip_idx * 4 + company_index)
+        # Select vehicle based on order weights (realistic capacity matching)
+        selected_vehicle = select_vehicle_for_orders(trip_orders, vehicles, trip_idx)
         trip = create_trip_with_orders(
             db=db,
             company_id=company.id,
             driver=drivers[trip_idx % len(drivers)],
-            vehicle=vehicles[trip_idx % len(vehicles)],
+            vehicle=selected_vehicle,
             planning_session=planning_session,
             orders=trip_orders,
             planned_day=planned_day,
             status=TripStatusEnum.COMPLETED,
-            trip_index=company_index * 100 + trip_idx,
+            trip_index=trip_idx,
         )
         trip.created_at = dt((planned_day - TODAY).days, 6, 30)
         trip.started_at = dt((planned_day - TODAY).days, 7, 15)
@@ -662,6 +739,7 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
     db.flush()
 
     drivers = []
+    available_driver_count = scenario.get("available_drivers", 6)
     for index, driver_user in enumerate(driver_users):
         driver = Driver(
             company_id=company.id,
@@ -671,7 +749,11 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
             shift_end=time(15 + index % 4, 30),
             max_hours_day=8.0 + (index % 3) * 0.5,
             hours_driven_today=0.0 if index < 5 else 2.0,
-            status=DriverStatusEnum.AVAILABLE if index < 6 else DriverStatusEnum.OFF_DUTY,
+            status=(
+                DriverStatusEnum.AVAILABLE
+                if index < available_driver_count
+                else DriverStatusEnum.OFF_DUTY
+            ),
             preferred_zones=[zone[1] for zone in scenario["zones"][index % len(scenario["zones"]):index % len(scenario["zones"]) + 1]],
         )
         db.add(driver)
@@ -686,6 +768,46 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
                 value="7.45",
                 data_type=ConfigDataTypeEnum.DECIMAL,
                 description="Pret combustibil folosit in demo",
+                updated_by=manager.id,
+            ),
+            SystemConfig(
+                company_id=company.id,
+                key="driver_hourly_rate",
+                value="35.00",
+                data_type=ConfigDataTypeEnum.DECIMAL,
+                description="Tarif orar sofer",
+                updated_by=manager.id,
+            ),
+            SystemConfig(
+                company_id=company.id,
+                key="vehicle_daily_amortization",
+                value="160.00",
+                data_type=ConfigDataTypeEnum.DECIMAL,
+                description="Amortizare folosita per cursa",
+                updated_by=manager.id,
+            ),
+            SystemConfig(
+                company_id=company.id,
+                key="vehicle_consumption_van",
+                value="9.20",
+                data_type=ConfigDataTypeEnum.DECIMAL,
+                description="Consum implicit VAN",
+                updated_by=manager.id,
+            ),
+            SystemConfig(
+                company_id=company.id,
+                key="vehicle_consumption_truck",
+                value="19.50",
+                data_type=ConfigDataTypeEnum.DECIMAL,
+                description="Consum implicit TRUCK",
+                updated_by=manager.id,
+            ),
+            SystemConfig(
+                company_id=company.id,
+                key="vehicle_consumption_car",
+                value="6.10",
+                data_type=ConfigDataTypeEnum.DECIMAL,
+                description="Consum implicit CAR",
                 updated_by=manager.id,
             ),
             SystemConfig(
@@ -801,36 +923,46 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
     ]
     for trip_index, trip_status in enumerate(trip_statuses):
         if trip_status == TripStatusEnum.COMPLETED:
+            # Use 5-6 orders per COMPLETED trip for good utilization
             trip_orders = orders_by_status[OrderStatusEnum.DELIVERED][
-                trip_index * 4: trip_index * 4 + 4
+                trip_index * 6: trip_index * 6 + 6
             ]
         elif trip_status == TripStatusEnum.IN_PROGRESS:
+            # Use 5-6 orders for active trip
             trip_orders = (
                 orders_by_status[OrderStatusEnum.IN_DELIVERY]
                 + orders_by_status[OrderStatusEnum.PLANNED]
-            )[:4]
+            )[:6]
         elif trip_status == TripStatusEnum.INTERRUPTED:
+            # Use 5 orders for interrupted trip
             trip_orders = (
                 orders_by_status[OrderStatusEnum.FAILED]
                 + orders_by_status[OrderStatusEnum.PLANNED]
-            )[:4]
+            )[:5]
         else:
+            # Use 5-6 orders per APPROVED trip
             trip_orders = orders_by_status[OrderStatusEnum.PLANNED][
-                trip_index * 4: trip_index * 4 + 4
+                trip_index * 6: trip_index * 6 + 6
             ]
         if not trip_orders:
             continue
-        planned_day = TODAY + timedelta(days=trip_index - 3)
+        planned_day = (
+            TODAY - timedelta(days=trip_index)
+            if trip_status == TripStatusEnum.COMPLETED
+            else TODAY + timedelta(days=trip_index - 3)
+        )
+        # Select vehicle based on order weights (realistic capacity matching)
+        selected_vehicle = select_vehicle_for_orders(trip_orders, vehicles, trip_index)
         trip = create_trip_with_orders(
             db=db,
             company_id=company.id,
             driver=drivers[trip_index % len(drivers)],
-            vehicle=vehicles[trip_index % len(vehicles)],
+            vehicle=selected_vehicle,
             planning_session=planning_sessions[trip_index % len(planning_sessions)],
             orders=trip_orders,
             planned_day=planned_day,
             status=trip_status,
-            trip_index=company_index * 10 + trip_index,
+            trip_index=trip_index,
         )
         trips.append(trip)
     db.flush()

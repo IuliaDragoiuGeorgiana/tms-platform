@@ -21,6 +21,7 @@ from app.services.service_time_service import ensure_order_service_times
 from app.services.order_feasibility_service import check_order_operational_warnings
 from app.services.load_compatibility_service import check_load_compatibility_warnings
 from app.services.strategy_service import distribute_orders_by_strategy
+from app.services.trip_cost_service import upsert_trip_cost
 from zoneinfo import ZoneInfo
 from sqlalchemy import or_
 
@@ -1230,6 +1231,7 @@ def _plan_day(
 
             db.add(trip)
             db.flush()
+            upsert_trip_cost(db, trip)
 
             trip_id = trip.id
 
@@ -1551,14 +1553,13 @@ def _repair_deferred_distribution(
     distribution: dict,
     date_start: date,
     date_end: date,
+    estimated_minutes_by_order: dict[str, int],
 ) -> dict:
     """
-    Reintroduce comenzile deferred într-o zi eligibilă înainte de planificarea reală.
+    Reintroduce comenzile deferred numai dacă mai există capacitate estimată.
 
-    Motiv:
-    - strategy_service folosește doar estimări;
-    - _plan_day + OR-Tools trebuie să ia decizia finală;
-    - nu vrem ca o comandă să fie dropped doar pentru că estimarea a fost conservatoare.
+    Păstrează invariantul distribuției: used_minutes nu poate depăși
+    capacity_by_day_minutes pentru nicio zi din interval.
     """
     deferred_orders = distribution.get("deferred", [])
 
@@ -1571,24 +1572,25 @@ def _repair_deferred_distribution(
         earliest_day, latest_day = _get_order_planning_window(order)
 
         # Alegem ultima zi posibilă din intervalul selectat.
-        retry_day = min(latest_day, date_end)
+        first_day = max(earliest_day, date_start)
+        last_day = min(latest_day, date_end)
+        estimated_minutes = estimated_minutes_by_order.get(str(order.id))
+        placed = False
 
-        # Dacă retry_day nu este validă pentru comanda respectivă,
-        # comanda chiar nu poate fi planificată în interval.
-        if retry_day < date_start or retry_day < earliest_day:
+        if estimated_minutes is not None and first_day <= last_day:
+            retry_day = last_day
+            while retry_day >= first_day:
+                day_capacity = distribution["capacity_by_day_minutes"].get(retry_day, 0)
+                used_minutes = distribution["used_minutes"].get(retry_day, 0)
+                if used_minutes + estimated_minutes <= day_capacity:
+                    distribution["days"].setdefault(retry_day, []).append(order)
+                    distribution["used_minutes"][retry_day] = used_minutes + estimated_minutes
+                    placed = True
+                    break
+                retry_day -= timedelta(days=1)
+
+        if not placed:
             still_deferred.append(order)
-            continue
-
-        if retry_day not in distribution["days"]:
-            distribution["days"][retry_day] = []
-
-        existing_order_ids = {
-            str(existing_order.id)
-            for existing_order in distribution["days"][retry_day]
-        }
-
-        if str(order.id) not in existing_order_ids:
-            distribution["days"][retry_day].append(order)
 
     distribution["deferred"] = still_deferred
 
@@ -1949,6 +1951,7 @@ def change_trip_vehicle(
 
     old_vehicle_id = trip.vehicle_id
     trip.vehicle_id = new_vehicle_id
+    upsert_trip_cost(db, trip)
     db.commit()
     db.refresh(trip)
 
@@ -2326,6 +2329,7 @@ def _reoptimize_trip_with_orders(
 
     trip.planned_km = round(total_km, 1)
     trip.planned_duration_min = round(total_minutes)
+    upsert_trip_cost(db, trip)
 
     return {
         "planned_km": trip.planned_km,
@@ -2951,6 +2955,7 @@ def create_ad_hoc_trip(
     if not dry_run:
         db.add(trip)
         db.flush()
+        upsert_trip_cost(db, trip)
 
     sequence = 1
     num_orders = len(ordered_orders)
@@ -3424,6 +3429,7 @@ def create_adhoc_planning_session(
     if not dry_run:
         db.add(trip)
         db.flush()
+        upsert_trip_cost(db, trip)
 
     sequence = 1
     num_orders = len(ordered_orders)
@@ -3836,12 +3842,12 @@ def run_planning(
         estimated_minutes_by_order=estimated_minutes_by_order,
     )
 
-    # PAS 4.5: Repair pentru comenzile deferred.
-    # Nu le marcăm dropped doar pe baza estimării.
+    # PAS 4.5: Repair doar în limita capacității estimate rămase.
     distribution = _repair_deferred_distribution(
         distribution=distribution,
         date_start=date_start,
         date_end=date_end,
+        estimated_minutes_by_order=estimated_minutes_by_order,
     )
 
     debug_timings["distribution_ms"] = round(
@@ -3916,8 +3922,8 @@ def run_planning(
         all_dropped_orders.append({
             "order_id": str(order.id),
             "order_ref": order.order_ref,
-            "reason_code": "DEFERRED_OUTSIDE_PLANNING_INTERVAL",
-            "reason": "Comanda nu poate fi planificată în intervalul selectat",
+            "reason_code": "DEFERRED_CAPACITY_OR_INTERVAL",
+            "reason": "Comanda nu încape în capacitatea estimată din interval",
             "priority": (
                 order.priority.value
                 if hasattr(order.priority, "value")

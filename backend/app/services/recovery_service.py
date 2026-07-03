@@ -2,7 +2,7 @@
 Serviciul de recuperare a comenzilor după o avarie majoră.
 Implementează RECOVER_ALL_REMAINING strategy cu reoptimizare reală ORS + OR-Tools.
 """
-from datetime import datetime, timezone, time as time_type, timedelta
+from datetime import date, datetime, timezone, time as time_type, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from fastapi import HTTPException
@@ -19,6 +19,7 @@ from app.models.order import Order, OrderStatusEnum
 from app.models.system_config import SystemConfig
 
 from app.services.ors_service import get_distance_matrix
+from app.services.trip_cost_service import calculate_cost_components, upsert_trip_cost
 from app.services.vrp_service import solve_pdp_for_cluster
 
 LOCAL_TZ = ZoneInfo("Europe/Bucharest")
@@ -528,7 +529,15 @@ def optimize_recovery_for_candidate(
     }
 
 
-def _build_route_recovery_analysis(db: Session, incident: Incident, strategy_type: str, picked_up_only: bool = False) -> dict:
+def _build_route_recovery_analysis(
+    db: Session,
+    incident: Incident,
+    strategy_type: str,
+    picked_up_only: bool = False,
+    unpicked_only: bool = False,
+    planning_date: date | None = None,
+    start_at_shift: bool = False,
+) -> dict:
     """
     Construiește analiza reală de impact cu ORS + OR-Tools.
     """
@@ -541,6 +550,12 @@ def _build_route_recovery_analysis(db: Session, incident: Incident, strategy_typ
             order_id: info
             for order_id, info in affected_orders_dict.items()
             if not info["has_pending_pickup"] and info["has_pending_delivery"]
+        }
+    elif unpicked_only:
+        affected_orders_dict = {
+            order_id: info
+            for order_id, info in affected_orders_dict.items()
+            if info["has_pending_pickup"] and info["has_pending_delivery"]
         }
 
     if not affected_orders_dict:
@@ -586,12 +601,13 @@ def _build_route_recovery_analysis(db: Session, incident: Incident, strategy_typ
     recovery_start_lat = depot_lat
     recovery_start_lon = depot_lon
 
-    incident_start_sec = incident_start_seconds(incident)
+    incident_start_sec = 0 if start_at_shift else incident_start_seconds(incident)
+    candidate_planning_date = planning_date or trip.planned_date
 
     candidates = find_candidate_drivers_vehicles(
         db,
         company_id=trip.company_id,
-        planned_date=trip.planned_date,
+        planned_date=candidate_planning_date,
         original_vehicle_id=trip.vehicle_id,
         original_driver_id=trip.driver_id,
         affected_orders_dict=affected_orders_dict,
@@ -668,12 +684,16 @@ def _build_route_recovery_analysis(db: Session, incident: Incident, strategy_typ
             failed_candidates += 1
             continue
 
-        cost_per_km = get_config_value(db, trip.company_id, "cost_per_km", 2.5)
-        driver_hourly_cost = get_config_value(db, trip.company_id, "driver_hourly_cost", 35.0)
-
-        fuel_cost = solution["planned_km"] * cost_per_km
-        driver_cost = solution["planned_duration_min"] / 60.0 * driver_hourly_cost
-        total_cost = fuel_cost + driver_cost
+        estimated_cost = calculate_cost_components(
+            db,
+            trip.company_id,
+            vehicle,
+            solution["planned_km"],
+            solution["planned_duration_min"],
+        )
+        fuel_cost = float(estimated_cost["fuel_cost"])
+        driver_cost = float(estimated_cost["driver_cost"])
+        total_cost = float(estimated_cost["total_cost"])
 
         # FIX #6: getattr fallback pentru driver_name
         driver_name = "Unknown"
@@ -687,6 +707,7 @@ def _build_route_recovery_analysis(db: Session, incident: Incident, strategy_typ
         option = {
             "option_id": f"{strategy_type.lower()}_{len(options) + 1}",
             "type": strategy_type,
+            "planned_date": candidate_planning_date.isoformat(),
             "feasible": True,
             "driver_id": str(driver.id),
             "driver_name": driver_name,
@@ -751,6 +772,7 @@ def _infeasible_recovery_option(option_id: str, strategy_type: str, warning: str
     return {
         "option_id": option_id,
         "type": strategy_type,
+        "planned_date": None,
         "feasible": False,
         "recommended": False,
         "driver_id": None,
@@ -796,36 +818,69 @@ def build_incident_recovery_analysis(db: Session, incident: Incident) -> dict:
         info for info in affected_orders.values()
         if not info["has_pending_pickup"] and info["has_pending_delivery"]
     ]
-    postpone_warnings = []
-    postpone_feasible = bool(unpicked_orders)
-    if postpone_feasible:
-        postpone_warnings.append(
-            "Comenzile nepreluate vor fi readuse în Order Pool pentru replanificare."
-        )
+    postpone_options = []
+    postpone_failure_warning = "Nu există comenzi nepreluate care pot fi amânate."
+
+    if unpicked_orders:
+        first_day = incident.trip.planned_date + timedelta(days=1)
+        last_day = first_day + timedelta(days=14)
+
+        for info in unpicked_orders:
+            order = info["order"]
+            if order.delivery_deadline:
+                flexibility_days = order.flexibility_days or 0
+                order_first_day = order.delivery_deadline - timedelta(
+                    days=flexibility_days
+                )
+                if order.earliest_delivery_date:
+                    order_first_day = max(
+                        order_first_day, order.earliest_delivery_date
+                    )
+                first_day = max(first_day, order_first_day)
+                last_day = min(last_day, order.delivery_deadline)
+
+        candidate_day = first_day
+        while candidate_day <= last_day:
+            postpone_analysis = _build_route_recovery_analysis(
+                db,
+                incident,
+                "POSTPONE_REMAINING",
+                unpicked_only=True,
+                planning_date=candidate_day,
+                start_at_shift=True,
+            )
+            if postpone_analysis["options"]:
+                postpone_options = postpone_analysis["options"]
+                for option in postpone_options:
+                    option["warnings"] = [
+                        (
+                            "Rută proiectată pentru replanificare în data de "
+                            f"{candidate_day.isoformat()}."
+                        )
+                    ]
+                    if picked_orders:
+                        option["warnings"].append(
+                            "Marfa deja preluată necesită recovery separat."
+                        )
+                break
+            candidate_day += timedelta(days=1)
+
+        if not postpone_options:
+            postpone_failure_warning = (
+                "Nu s-a găsit în următoarea fereastră permisă o zi cu "
+                "șofer, vehicul și rută fezabilă pentru comenzile amânate."
+            )
+
+    if postpone_options:
+        options.extend(postpone_options)
     else:
-        postpone_warnings.append("Nu există comenzi nepreluate care pot fi amânate.")
-    if picked_orders:
-        postpone_warnings.append(
-            "Există marfă deja preluată în vehiculul avariat care necesită recovery."
+        options.append(
+            _infeasible_recovery_option(
+                "postpone_unavailable",
+                "POSTPONE_REMAINING",
+                postpone_failure_warning,
+            )
         )
-    options.append({
-        "option_id": "postpone_1",
-        "type": "POSTPONE_REMAINING",
-        "feasible": postpone_feasible,
-        "recommended": False,
-        "driver_id": None,
-        "driver_name": None,
-        "vehicle_id": None,
-        "vehicle_plate": None,
-        "planned_km": 0.0,
-        "planned_duration_min": 0.0,
-        "estimated_fuel_cost": 0.0,
-        "estimated_driver_cost": 0.0,
-        "estimated_total_cost": 0.0,
-        "late_orders_count": 0,
-        "warnings": postpone_warnings,
-        "route": [],
-    })
     for option in options:
         option["recommended"] = False
     recovery_options = [
@@ -851,7 +906,11 @@ def build_incident_recovery_analysis(db: Session, incident: Incident) -> dict:
             postpone["recommended"] = True
     all_analysis["options"] = options
     return all_analysis
-def postpone_remaining_orders(db: Session, incident: Incident) -> dict:
+def postpone_remaining_orders(
+    db: Session,
+    incident: Incident,
+    selected_option: dict | None = None,
+) -> dict:
     original_trip = incident.trip
     if incident.type != IncidentTypeEnum.MAJOR:
         raise HTTPException(status_code=400, detail="Postpone este disponibil doar pentru incidente MAJOR")
@@ -865,11 +924,17 @@ def postpone_remaining_orders(db: Session, incident: Incident) -> dict:
     }
     if not unpicked_orders:
         raise HTTPException(status_code=400, detail="Nu există comenzi nepreluate care pot fi amânate")
+    target_planning_date = None
+    if selected_option and selected_option.get("planned_date"):
+        try:
+            target_planning_date = date.fromisoformat(selected_option["planned_date"])
+        except (TypeError, ValueError):
+            target_planning_date = None
     postponed_refs = []
     for order_id, info in unpicked_orders.items():
         order = info["order"]
         order.status = OrderStatusEnum.PENDING
-        order.assigned_delivery_date = None
+        order.assigned_delivery_date = target_planning_date
         order.problem_reason = None
         order.is_problematic = False
         order.was_postponed = True
@@ -937,6 +1002,7 @@ def create_recovery_trip(db: Session, incident: Incident, selected_option: dict 
 
     db.add(recovery_trip)
     db.flush()
+    upsert_trip_cost(db, recovery_trip)
 
     real_sequence = 1
     for stop_data in route_stops:

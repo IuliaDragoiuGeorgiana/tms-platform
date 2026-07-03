@@ -100,6 +100,9 @@ export interface FleetUtilizationTripItem {
 export interface FleetUtilizationSummary {
   used_vehicles: number;
   unused_vehicles: number;
+  total_trips: number;
+  capacity_compliant_trips: number;
+  overloaded_trips: number;
   average_load_kg_percent: number;
   average_load_m3_percent: number;
   underutilized_trips: number;
@@ -221,6 +224,7 @@ export interface CostAnalyticsResponse {
   amortization_cost: number;
   cost_per_trip: number;
   cost_per_order: number;
+  total_actual_km: number;
   cost_per_km: number | null;
   cost_per_kg: number | null;
   cost_per_m3: number | null;

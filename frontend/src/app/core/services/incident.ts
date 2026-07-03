@@ -58,6 +58,7 @@ export interface IncidentRouteStopResponse {
 export interface IncidentRecoveryOptionResponse {
   option_id: string;
   type: string;
+  planned_date: string | null;
   feasible: boolean;
   recommended: boolean;
   driver_id: string | null;

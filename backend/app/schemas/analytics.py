@@ -105,6 +105,9 @@ class FleetUtilizationTripItem(BaseModel):
 class FleetUtilizationSummary(BaseModel):
     used_vehicles: int
     unused_vehicles: int
+    total_trips: int
+    capacity_compliant_trips: int
+    overloaded_trips: int
     average_load_kg_percent: float
     average_load_m3_percent: float
     underutilized_trips: int
@@ -230,6 +233,7 @@ class CostAnalyticsResponse(BaseModel):
     amortization_cost: float
     cost_per_trip: float
     cost_per_order: float
+    total_actual_km: float
     cost_per_km: Optional[float]
     cost_per_kg: Optional[float]
     cost_per_m3: Optional[float]

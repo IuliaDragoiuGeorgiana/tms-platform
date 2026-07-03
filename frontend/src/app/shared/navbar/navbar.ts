@@ -11,8 +11,10 @@ import { IncidentReportRequest, IncidentService } from '../../core/services/inci
 import { Theme, ThemeService } from '../../core/services/theme';
 import { TripResponse, TripService } from '../../core/services/trip';
 import {
+  CostConfigResponse,
   ServiceTimeConfigResponse,
   SystemConfigService,
+  UpdateCostConfigRequest,
   UpdateServiceTimeConfigRequest,
 } from '../../core/services/system-config';
 import { TranslatePipe } from '../../core/pipes/translate';
@@ -27,6 +29,14 @@ interface ServiceTimeRow {
 interface ServiceTimeGroup {
   title: string;
   rows: ServiceTimeRow[];
+}
+
+interface CostConfigRow {
+  key: keyof CostConfigResponse;
+  label: string;
+  unit: string;
+  value: number;
+  step: string;
 }
 
 @Component({
@@ -47,18 +57,26 @@ export class Navbar implements OnDestroy {
   isOptionsMenuOpen = false;
   isLanguageSubmenuOpen = false;
   isServiceTimeWindowOpen = false;
+  isCostConfigWindowOpen = false;
   isIncidentWindowOpen = false;
   isLoadingServiceTimes = false;
   isSavingServiceTimes = false;
+  isLoadingCostConfig = false;
+  isSavingCostConfig = false;
   isLoadingIncidentTrips = false;
   isReportingIncident = false;
   serviceTimeError = '';
   serviceTimeSuccess = '';
+  costConfigError = '';
+  costConfigSuccess = '';
   incidentError = '';
   incidentSuccess = '';
   serviceTimeConfig: ServiceTimeConfigResponse | null = null;
   originalServiceTimeConfig: ServiceTimeConfigResponse | null = null;
   serviceTimeGroups: ServiceTimeGroup[] = [];
+  costConfig: CostConfigResponse | null = null;
+  originalCostConfig: CostConfigResponse | null = null;
+  costConfigRows: CostConfigRow[] = [];
   incidentTrips: TripResponse[] = [];
   private readonly formBuilder = inject(FormBuilder);
   readonly incidentForm = this.formBuilder.group({
@@ -104,6 +122,7 @@ export class Navbar implements OnDestroy {
       if (role === RoleEnum.GUEST) {
         this.currentUser = null;
         this.closeServiceTimeWindow();
+        this.closeCostConfigWindow();
         this.closeIncidentWindow();
       } else {
         this.loadCurrentUser();
@@ -173,6 +192,96 @@ export class Navbar implements OnDestroy {
     this.loadServiceTimes();
     this.lockBackgroundScroll();
     this.changeDetectorRef.detectChanges();
+  }
+
+  openCostConfigWindow(): void {
+    if (this.currentRole !== RoleEnum.MANAGER) {
+      return;
+    }
+
+    this.isOptionsMenuOpen = false;
+    this.isLanguageSubmenuOpen = false;
+    this.isCostConfigWindowOpen = true;
+    this.costConfigError = '';
+    this.costConfigSuccess = '';
+    this.costConfig = null;
+    this.originalCostConfig = null;
+    this.costConfigRows = [];
+    this.loadCostConfig();
+    this.lockBackgroundScroll();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  closeCostConfigWindow(): void {
+    this.isCostConfigWindowOpen = false;
+    this.isLoadingCostConfig = false;
+    this.isSavingCostConfig = false;
+    this.costConfigError = '';
+    this.costConfigSuccess = '';
+    this.costConfig = null;
+    this.originalCostConfig = null;
+    this.costConfigRows = [];
+    this.unlockBackgroundScroll();
+    this.changeDetectorRef.detectChanges();
+  }
+
+  updateCostConfigValue(key: keyof CostConfigResponse, value: string): void {
+    if (!this.costConfig) {
+      return;
+    }
+
+    const parsedValue = Number(value);
+    this.costConfig = {
+      ...this.costConfig,
+      [key]: Number.isFinite(parsedValue) ? parsedValue : 0,
+    };
+    this.costConfigRows = this.buildCostConfigRows(this.costConfig);
+    this.costConfigError = '';
+    this.costConfigSuccess = '';
+    this.changeDetectorRef.detectChanges();
+  }
+
+  hasCostConfigChanges(): boolean {
+    if (!this.costConfig || !this.originalCostConfig) {
+      return false;
+    }
+
+    return (Object.keys(this.costConfig) as Array<keyof CostConfigResponse>).some(
+      (key) => this.costConfig?.[key] !== this.originalCostConfig?.[key],
+    );
+  }
+
+  saveCostConfig(): void {
+    if (!this.costConfig || !this.hasCostConfigChanges()) {
+      return;
+    }
+
+    if (Object.values(this.costConfig).some((value) => !Number.isFinite(value) || value <= 0)) {
+      this.costConfigError = 'dashboard.cost_config.invalid';
+      this.changeDetectorRef.detectChanges();
+      return;
+    }
+
+    this.isSavingCostConfig = true;
+    this.costConfigError = '';
+    this.costConfigSuccess = '';
+    const payload: UpdateCostConfigRequest = { ...this.costConfig };
+
+    this.systemConfigService.updateCostConfig(payload).subscribe({
+      next: (config) => {
+        this.costConfig = { ...config };
+        this.originalCostConfig = { ...config };
+        this.costConfigRows = this.buildCostConfigRows(config);
+        this.isSavingCostConfig = false;
+        this.costConfigSuccess = 'dashboard.cost_config.save_success';
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.costConfigError = error.error?.detail ?? 'common.error_generic';
+        this.isSavingCostConfig = false;
+        this.changeDetectorRef.detectChanges();
+      },
+    });
   }
 
   openIncidentWindow(): void {
@@ -402,6 +511,28 @@ export class Navbar implements OnDestroy {
     });
   }
 
+  private loadCostConfig(): void {
+    this.isLoadingCostConfig = true;
+    this.costConfigError = '';
+    this.costConfigSuccess = '';
+    this.changeDetectorRef.detectChanges();
+
+    this.systemConfigService.getCostConfig().subscribe({
+      next: (config) => {
+        this.costConfig = { ...config };
+        this.originalCostConfig = { ...config };
+        this.costConfigRows = this.buildCostConfigRows(config);
+        this.isLoadingCostConfig = false;
+        this.changeDetectorRef.detectChanges();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.costConfigError = error.error?.detail ?? 'common.error_generic';
+        this.isLoadingCostConfig = false;
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
   private loadIncidentTrips(): void {
     this.isLoadingIncidentTrips = true;
     this.incidentError = '';
@@ -448,6 +579,17 @@ export class Navbar implements OnDestroy {
         title: 'dashboard.service_time.adjustments_group',
         rows: rows.slice(8),
       },
+    ];
+  }
+
+  private buildCostConfigRows(config: CostConfigResponse): CostConfigRow[] {
+    return [
+      { key: 'fuel_price_per_liter', label: 'dashboard.cost_config.fuel_price', unit: 'dashboard.cost_config.ron_per_liter', value: config.fuel_price_per_liter, step: '0.01' },
+      { key: 'driver_hourly_rate', label: 'dashboard.cost_config.driver_rate', unit: 'dashboard.cost_config.ron_per_hour', value: config.driver_hourly_rate, step: '0.01' },
+      { key: 'vehicle_daily_amortization', label: 'dashboard.cost_config.amortization', unit: 'dashboard.cost_config.ron_per_trip', value: config.vehicle_daily_amortization, step: '0.01' },
+      { key: 'vehicle_consumption_van', label: 'dashboard.cost_config.consumption_van', unit: 'dashboard.cost_config.liters_per_100km', value: config.vehicle_consumption_van, step: '0.1' },
+      { key: 'vehicle_consumption_truck', label: 'dashboard.cost_config.consumption_truck', unit: 'dashboard.cost_config.liters_per_100km', value: config.vehicle_consumption_truck, step: '0.1' },
+      { key: 'vehicle_consumption_car', label: 'dashboard.cost_config.consumption_car', unit: 'dashboard.cost_config.liters_per_100km', value: config.vehicle_consumption_car, step: '0.1' },
     ];
   }
 

@@ -20,6 +20,17 @@ export interface ServiceTimeConfigResponse {
 
 export type UpdateServiceTimeConfigRequest = ServiceTimeConfigResponse;
 
+export interface CostConfigResponse {
+  fuel_price_per_liter: number;
+  driver_hourly_rate: number;
+  vehicle_daily_amortization: number;
+  vehicle_consumption_van: number;
+  vehicle_consumption_truck: number;
+  vehicle_consumption_car: number;
+}
+
+export type UpdateCostConfigRequest = CostConfigResponse;
+
 @Injectable({
   providedIn: 'root',
 })
@@ -42,4 +53,17 @@ export class SystemConfigService {
       headers: this.authService.getAuthHeaders(),
     });
   }
+
+  getCostConfig(): Observable<CostConfigResponse> {
+    return this.http.get<CostConfigResponse>(this.apiUrl + '/costs', {
+      headers: this.authService.getAuthHeaders(),
+    });
+  }
+
+  updateCostConfig(data: UpdateCostConfigRequest): Observable<CostConfigResponse> {
+    return this.http.put<CostConfigResponse>(this.apiUrl + '/costs', data, {
+      headers: this.authService.getAuthHeaders(),
+    });
+  }
+
 }

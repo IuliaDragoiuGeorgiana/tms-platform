@@ -63,5 +63,9 @@ class TripStop(UUIDPrimaryKey, Base):
 
         return self.order.address_delivery
 
+    @property
+    def order_ref(self) -> str | None:
+        return self.order.order_ref if self.order else None
+
     def __repr__(self) -> str:
         return f"<TripStop #{self.sequence} ({self.status.value})>"

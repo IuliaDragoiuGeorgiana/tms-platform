@@ -161,7 +161,11 @@
     <div class="panel-header">
       <div>
         <h2>{{ 'incidents.impact.title' | translate }}</h2>
-        <p>{{ selectedImpactIncident.id }}</p>
+        <p>
+          {{ selectedImpactIncident.driver_name || selectedImpactIncident.driver_id }} •
+          {{ selectedImpactIncident.vehicle_plate || selectedImpactIncident.vehicle_id }} •
+          {{ impactAnalysis?.affected_orders_count }} orders
+        </p>
       </div>
       <button type="button" class="modal-close" (click)="closeImpactAnalysis()">
         {{ 'orders.close' | translate }}
@@ -244,6 +248,12 @@
         }
 
         <span class="impact-option-metrics">
+          @if (option.planned_date) {
+          <span>
+            <span>{{ 'incidents.impact.planned_date' | translate }}</span>
+            <strong>{{ option.planned_date | date: 'dd.MM.yyyy' }}</strong>
+          </span>
+          }
           <span>
             <span>{{ 'planning.compare.distance' | translate }}</span>
             <strong>{{ option.planned_km }} km</strong>

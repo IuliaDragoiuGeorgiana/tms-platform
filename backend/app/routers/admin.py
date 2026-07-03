@@ -308,7 +308,7 @@ def deactivate_user(
 @router.get("/users/employees", response_model=list[UserResponse])
 def list_company_employees(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("MANAGER")),
+    current_user: User = Depends(require_roles("MANAGER", "DISPECER")),
 ):
     """
     Listează dispecerii și șoferii din compania managerului curent.

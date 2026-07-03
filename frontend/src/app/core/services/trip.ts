@@ -26,6 +26,7 @@ export interface TripStopResponse {
   id: string;
   trip_id: string;
   order_id: string;
+  order_ref?: string | null;
   address?: string | null;
   sequence: number;
   stop_type: string;
@@ -38,9 +39,15 @@ export interface TripStopResponse {
   notes: string | null;
 }
 
+export interface CompleteStopRequest {
+  notes?: string | null;
+  actual_km?: number | null;
+}
+
 export interface FailStopRequest {
   failure_reason: string;
   notes?: string | null;
+  actual_km?: number | null;
 }
 
 @Injectable({
@@ -98,10 +105,14 @@ export class TripService {
     );
   }
 
-  completeStop(tripId: string, stopId: string): Observable<TripStopResponse> {
+  completeStop(
+    tripId: string,
+    stopId: string,
+    data: CompleteStopRequest = {},
+  ): Observable<TripStopResponse> {
     return this.http.patch<TripStopResponse>(
       `${this.apiUrl}/${tripId}/stops/${stopId}/complete`,
-      {},
+      data,
       { headers: this.authService.getAuthHeaders() },
     );
   }

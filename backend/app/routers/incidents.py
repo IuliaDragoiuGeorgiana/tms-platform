@@ -210,7 +210,11 @@ def recover_incident(
         )
     selected_strategy = selected_option["type"]
     if selected_strategy == "POSTPONE_REMAINING":
-        postpone_result = postpone_remaining_orders(db=db, incident=incident)
+        postpone_result = postpone_remaining_orders(
+            db=db,
+            incident=incident,
+            selected_option=selected_option,
+        )
         return {
             "message": "Comenzile nepreluate au fost trimise pentru replanificare.",
             "incident_id": incident.id,

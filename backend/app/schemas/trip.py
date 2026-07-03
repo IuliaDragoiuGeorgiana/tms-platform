@@ -1,6 +1,6 @@
 import uuid
 from datetime import date, datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TripResponse(BaseModel):
@@ -29,6 +29,7 @@ class TripStopResponse(BaseModel):
     id: uuid.UUID
     trip_id: uuid.UUID
     order_id: uuid.UUID
+    order_ref: str | None = None
     address: str | None = None
     sequence: int
     stop_type: str
@@ -46,9 +47,11 @@ class TripStopResponse(BaseModel):
 class CompleteStopRequest(BaseModel):
     """Ce trimite SOFERUL când finalizează un stop (pickup sau delivery)."""
     notes: str | None = None
+    actual_km: float | None = Field(default=None, ge=0)
 
 
 class FailStopRequest(BaseModel):
     """Ce trimite SOFERUL când un stop eșuează."""
     failure_reason: str    # ABSENT / REFUSED / WRONG_ADDRESS / DAMAGED / OTHER
     notes: str | None = None
+    actual_km: float | None = Field(default=None, ge=0)

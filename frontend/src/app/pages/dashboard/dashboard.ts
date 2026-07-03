@@ -18,6 +18,8 @@ import {
   TripSummary,
 } from '../../core/services/dashboard';
 import { TranslatePipe } from '../../core/pipes/translate';
+import { OrderResponse, OrderService } from '../../core/services/order';
+import { I18nService, Language } from '../../core/services/i18n';
 
 interface Metric {
   label: string;
@@ -503,10 +505,15 @@ export class Dashboard implements OnInit {
   isLoadingManagerDashboard = false;
   isLoadingSuperAdminDashboard = false;
   isLoadingDispatcherDashboard = false;
+  clientOrders: OrderResponse[] = [];
+  isLoadingClientDashboard = false;
+  clientDashboardError = '';
 
   constructor(
     private authService: AuthService,
     private dashboardService: DashboardService,
+    private orderService: OrderService,
+    private i18nService: I18nService,
     private changeDetectorRef: ChangeDetectorRef,
   ) {
     this.currentRole = this.authService.getCurrentRole();
@@ -521,6 +528,8 @@ export class Dashboard implements OnInit {
       this.loadSuperAdminDashboard();
     } else if (this.isDispatcherDashboard) {
       this.loadDispatcherDashboard();
+    } else if (this.isClientDashboard) {
+      this.loadClientDashboard();
     }
   }
 
@@ -534,6 +543,50 @@ export class Dashboard implements OnInit {
 
   get isDispatcherDashboard(): boolean {
     return this.currentRole === RoleEnum.DISPECER;
+  }
+
+  get isClientDashboard(): boolean {
+    return this.currentRole === RoleEnum.CLIENT;
+  }
+
+  get clientRecentOrders(): OrderResponse[] {
+    return [...this.clientOrders]
+      .sort((left, right) => this.orderTimestamp(right) - this.orderTimestamp(left))
+      .slice(0, 5);
+  }
+
+  get clientActiveOrders(): number {
+    return this.clientOrders.filter((order) =>
+      ['PENDING', 'PLANNED', 'IN_DELIVERY'].includes(order.status),
+    ).length;
+  }
+
+  get clientInDeliveryOrders(): number {
+    return this.clientOrders.filter((order) => order.status === 'IN_DELIVERY').length;
+  }
+
+  get clientDeliveredOrders(): number {
+    return this.clientOrders.filter((order) => order.status === 'DELIVERED').length;
+  }
+
+  get clientAttentionOrders(): number {
+    return this.clientOrders.filter(
+      (order) => order.status === 'FAILED' || Boolean(order.is_problematic),
+    ).length;
+  }
+
+  get clientNextDelivery(): OrderResponse | null {
+    return (
+      [...this.clientOrders]
+        .filter((order) => ['PENDING', 'PLANNED', 'IN_DELIVERY'].includes(order.status))
+        .sort((left, right) => left.delivery_deadline.localeCompare(right.delivery_deadline))[0] ??
+      null
+    );
+  }
+
+  get clientDeliveryProgress(): number {
+    const order = this.clientNextDelivery;
+    return order ? this.orderProgress(order.status) : 0;
   }
 
   get managerData(): ManagerDashboardData {
@@ -602,6 +655,60 @@ export class Dashboard implements OnInit {
     return period === 1 ? 'Last 1 day' : `Last ${period} days`;
   }
 
+  orderProgress(status: string): number {
+    const progress: Record<string, number> = {
+      PENDING: 18,
+      PLANNED: 45,
+      IN_DELIVERY: 76,
+      DELIVERED: 100,
+      FAILED: 100,
+      CANCELLED: 100,
+    };
+
+    return progress[status] ?? 0;
+  }
+
+  orderStatusKey(status: string): string {
+    return `orders.status.${status.toLowerCase()}`;
+  }
+
+  orderStatusClass(status: string): string {
+    return `client-status client-status--${status.toLowerCase().replaceAll('_', '-')}`;
+  }
+
+  orderRoute(order: OrderResponse): string {
+    return `${order.pickup_city || this.shortAddress(order.address_pickup)} -> ${
+      order.delivery_city || this.shortAddress(order.address_delivery)
+    }`;
+  }
+
+  formatClientDate(value: string): string {
+    const localeByLanguage: Record<Language, string> = {
+      [Language.EN]: 'en-GB',
+      [Language.RO]: 'ro-RO',
+      [Language.HU]: 'hu-HU',
+    };
+    const date = new Date(`${value}T12:00:00`);
+
+    return new Intl.DateTimeFormat(localeByLanguage[this.i18nService.currentLanguage], {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(date);
+  }
+
+  private shortAddress(value: string): string {
+    const parts = value
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    return parts.length > 1 ? parts[parts.length - 1] : value;
+  }
+
+  private orderTimestamp(order: OrderResponse): number {
+    return order.created_at ? new Date(order.created_at).getTime() : 0;
+  }
+
   private loadManagerDashboard(): void {
     this.isLoadingManagerDashboard = true;
     this.changeDetectorRef.detectChanges();
@@ -651,6 +758,26 @@ export class Dashboard implements OnInit {
       error: () => {
         this.dispatcherDashboardData = DISPATCHER_DASHBOARD_DATA;
         this.isLoadingDispatcherDashboard = false;
+        this.changeDetectorRef.detectChanges();
+      },
+    });
+  }
+
+  loadClientDashboard(): void {
+    this.isLoadingClientDashboard = true;
+    this.clientDashboardError = '';
+    this.changeDetectorRef.detectChanges();
+
+    this.orderService.listOrders().subscribe({
+      next: (orders) => {
+        this.clientOrders = orders;
+        this.isLoadingClientDashboard = false;
+        this.changeDetectorRef.detectChanges();
+      },
+      error: () => {
+        this.clientOrders = [];
+        this.isLoadingClientDashboard = false;
+        this.clientDashboardError = 'dashboard.client.load_error';
         this.changeDetectorRef.detectChanges();
       },
     });

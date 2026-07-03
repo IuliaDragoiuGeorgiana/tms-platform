@@ -52,11 +52,13 @@ export interface OrderResponse {
   order_ref: string;
   client_id: string;
   address_pickup: string;
+  pickup_city?: string | null;
   pickup_lat?: number | null;
   pickup_lon?: number | null;
   pickup_time_window_start: string | null;
   pickup_time_window_end: string | null;
   address_delivery: string;
+  delivery_city?: string | null;
   delivery_lat?: number | null;
   delivery_lon?: number | null;
   delivery_time_window_start: string | null;

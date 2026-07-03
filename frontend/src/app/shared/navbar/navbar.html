@@ -188,6 +188,10 @@
       <app-icon class="nav-icon" name="clock" />
       <span>{{ 'dashboard.action.service_time' | translate }}</span>
     </button>
+    <button type="button" (click)="openCostConfigWindow()">
+      <app-icon class="nav-icon" name="gear" />
+      <span>{{ 'dashboard.action.cost_config' | translate }}</span>
+    </button>
     } @if (currentRole === RoleEnum.MANAGER || currentRole === RoleEnum.DISPECER) {
     <a routerLink="/planning" routerLinkActive="active">
       <app-icon class="nav-icon" name="route" />
@@ -302,6 +306,51 @@
           ? ('dashboard.service_time.saving' | translate)
           : ('dashboard.service_time.save' | translate)
       }}
+    </button>
+  </div>
+  }
+</section>
+}
+
+@if (isCostConfigWindowOpen) {
+<div class="service-time-backdrop" (click)="closeCostConfigWindow()"></div>
+<section class="service-time-modal" role="dialog" aria-modal="true" [attr.aria-label]="'dashboard.cost_config.title' | translate" (click)="$event.stopPropagation()">
+  <div class="service-time-modal__header">
+    <div>
+      <h2>{{ 'dashboard.cost_config.title' | translate }}</h2>
+      <span>{{ 'dashboard.cost_config.description' | translate }}</span>
+    </div>
+    <button type="button" class="service-time-modal__close" (click)="closeCostConfigWindow()">{{ 'orders.close' | translate }}</button>
+  </div>
+  @if (costConfigError) {
+  <div class="service-time-alert service-time-alert--error">{{ costConfigError | translate }}</div>
+  }
+  @if (costConfigSuccess) {
+  <div class="service-time-alert service-time-alert--success">{{ costConfigSuccess | translate }}</div>
+  }
+  @if (isLoadingCostConfig) {
+  <div class="service-time-empty"><h2>{{ 'dashboard.cost_config.loading' | translate }}</h2></div>
+  } @else {
+  <div class="service-time-groups">
+    <section class="service-time-group">
+      <div class="service-time-list">
+        @for (row of costConfigRows; track row.key) {
+        <label class="service-time-field">
+          <span>{{ row.label | translate }}</span>
+          <div>
+            <input type="number" min="0.01" [step]="row.step" [value]="row.value" [disabled]="isSavingCostConfig" (input)="updateCostConfigValue(row.key, $any($event.target).value)" />
+            <small>{{ row.unit | translate }}</small>
+          </div>
+        </label>
+        } @empty {
+        <p class="service-time-empty">{{ 'dashboard.cost_config.empty' | translate }}</p>
+        }
+      </div>
+    </section>
+  </div>
+  <div class="service-time-modal__footer">
+    <button type="button" class="service-time-save" [disabled]="!hasCostConfigChanges() || isSavingCostConfig" (click)="saveCostConfig()">
+      {{ isSavingCostConfig ? ('dashboard.cost_config.saving' | translate) : ('dashboard.cost_config.save' | translate) }}
     </button>
   </div>
   }

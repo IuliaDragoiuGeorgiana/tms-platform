@@ -63,6 +63,9 @@ export class Planning implements OnInit, OnDestroy {
   planGenerationSuccess = '';
   eligibleOrdersResponse: EligibleOrdersResponse | null = null;
   proposedTrips: TripResponse[] = [];
+  drivers: any[] = [];
+  driverUsers: any[] = [];
+  vehicles: any[] = [];
   driverLabels = new Map<string, string>();
   vehicleLabels = new Map<string, string>();
   driverOptions: TripAssignmentOption[] = [];
@@ -149,6 +152,10 @@ export class Planning implements OnInit, OnDestroy {
       next: ({ employees, drivers, vehicles }) => {
         const employeesById = new Map(employees.map((employee) => [employee.id, employee]));
 
+        this.drivers = drivers;
+        this.driverUsers = employees;
+        this.vehicles = vehicles;
+
         this.driverLabels = new Map(
           drivers.map((driver) => {
             const employee = employeesById.get(driver.user_id);
@@ -167,6 +174,9 @@ export class Planning implements OnInit, OnDestroy {
         this.changeDetectorRef.detectChanges();
       },
       error: () => {
+        this.drivers = [];
+        this.driverUsers = [];
+        this.vehicles = [];
         this.driverLabels = new Map();
         this.vehicleLabels = new Map();
         this.driverOptions = [];
@@ -177,11 +187,39 @@ export class Planning implements OnInit, OnDestroy {
   }
 
   getDriverLabel(driverId: string | null): string {
-    return driverId ? this.driverLabels.get(driverId) ?? driverId : 'vehicles.not_available';
+    if (!driverId) {
+      return 'N/A';
+    }
+    return this.driverLabels.get(driverId) ?? driverId;
   }
 
   getVehicleLabel(vehicleId: string | null): string {
-    return vehicleId ? this.vehicleLabels.get(vehicleId) ?? vehicleId : 'vehicles.not_available';
+    if (!vehicleId) {
+      return 'N/A';
+    }
+    return this.vehicleLabels.get(vehicleId) ?? vehicleId;
+  }
+
+  getTripDriverLabel(trip: TripResponse): string {
+    return trip.driver_name ?? this.getDriverLabel(trip.driver_id);
+  }
+
+  getTripVehicleLabel(trip: TripResponse): string {
+    return trip.vehicle_label ?? this.getVehicleLabel(trip.vehicle_id);
+  }
+
+  getTripLabel(trip: TripResponse): string {
+    const orderRefs = new Set<string>();
+    this.selectedEditTripStops.forEach((stop) => {
+      if (stop.order_ref) {
+        orderRefs.add(stop.order_ref);
+      }
+    });
+
+    if (orderRefs.size > 0) {
+      return `${Array.from(orderRefs).join(', ')}`;
+    }
+    return `Trip ${trip.planned_date}`;
   }
 
   loadProposedTrips(): void {
@@ -361,6 +399,11 @@ export class Planning implements OnInit, OnDestroy {
     this.selectedEditTripStops.forEach((stop) => orderIds.add(stop.order_id));
 
     return [...orderIds];
+  }
+
+  getOrderRef(orderId: string): string {
+    const stop = this.selectedEditTripStops.find((s) => s.order_id === orderId);
+    return stop?.order_ref ?? orderId;
   }
 
   getAvailableTripOrders(): EligibleOrderSummary[] {
