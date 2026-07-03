@@ -111,6 +111,7 @@ class FleetUtilizationSummary(BaseModel):
     average_load_kg_percent: float
     average_load_m3_percent: float
     underutilized_trips: int
+    normal_trips: int
     near_capacity_trips: int
     efficient_trips: int
 
@@ -215,7 +216,7 @@ class CostGroupItem(BaseModel):
 
 class ExpensiveTripItem(BaseModel):
     trip_id: str
-    planned_km: float
+    actual_km: float
     orders_count: int
     total_cost: float
     cost_per_order: float

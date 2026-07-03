@@ -1,8 +1,16 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, HostListener, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
-import { AnalyticsService, ZoneDemandResponse, FleetUtilizationResponse, PlanVsActualResponse, CostAnalyticsResponse } from '../../core/services/analytics';
+import {
+  AnalyticsService,
+  ZoneDemandResponse,
+  FleetUtilizationResponse,
+  FleetUtilizationTripItem,
+  PlanVsActualResponse,
+  CostAnalyticsResponse,
+  IncidentImpactResponse,
+} from '../../core/services/analytics';
 import { I18nService } from '../../core/services/i18n';
 import { TranslatePipe } from '../../core/pipes/translate';
 
@@ -17,6 +25,8 @@ export class Analytics implements OnInit {
   protected readonly fleetUtilization = signal<FleetUtilizationResponse | null>(null);
   protected readonly planVsActual = signal<PlanVsActualResponse | null>(null);
   protected readonly costs = signal<CostAnalyticsResponse | null>(null);
+  protected readonly incidentImpact = signal<IncidentImpactResponse | null>(null);
+  protected readonly selectedTrip = signal<FleetUtilizationTripItem | null>(null);
 
   protected readonly loading = signal(true);
   protected readonly error = signal<string | null>(null);
@@ -61,12 +71,14 @@ export class Analytics implements OnInit {
       this.analyticsService.getFleetUtilization(start, end).toPromise(),
       this.analyticsService.getPlanVsActual(start, end).toPromise(),
       this.analyticsService.getCosts(start, end).toPromise(),
+      this.analyticsService.getIncidentImpact(start, end).toPromise(),
     ])
-      .then(([zone, fleet, planVsActual, costs]) => {
+      .then(([zone, fleet, planVsActual, costs, incidentImpact]) => {
         if (zone) this.zoneDemand.set(zone);
         if (fleet) this.fleetUtilization.set(fleet);
         if (planVsActual) this.planVsActual.set(planVsActual);
         if (costs) this.costs.set(costs);
+        if (incidentImpact) this.incidentImpact.set(incidentImpact);
         this.loading.set(false);
       })
       .catch((err) => {
@@ -77,6 +89,19 @@ export class Analytics implements OnInit {
 
   protected selectTab(tab: 'overview' | 'zones' | 'fleet' | 'plan-vs-actual' | 'costs' | 'incidents'): void {
     this.selectedTab.set(tab);
+  }
+
+  protected openTripDetails(trip: FleetUtilizationTripItem): void {
+    this.selectedTrip.set(trip);
+  }
+
+  protected closeTripDetails(): void {
+    this.selectedTrip.set(null);
+  }
+
+  @HostListener('document:keydown.escape')
+  protected closeTripDetailsOnEscape(): void {
+    this.closeTripDetails();
   }
 
   protected getQualityColor(score: number): string {

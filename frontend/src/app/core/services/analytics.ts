@@ -106,6 +106,7 @@ export interface FleetUtilizationSummary {
   average_load_kg_percent: number;
   average_load_m3_percent: number;
   underutilized_trips: number;
+  normal_trips: number;
   near_capacity_trips: number;
   efficient_trips: number;
 }
@@ -206,7 +207,7 @@ export interface CostGroupItem {
 
 export interface ExpensiveTripItem {
   trip_id: string;
-  planned_km: number;
+  actual_km: number;
   orders_count: number;
   total_cost: number;
   cost_per_order: number;

@@ -97,7 +97,7 @@
           </div>
           <div class="stat">
             <span class="label">{{ 'analytics.efficient_trips' | translate }}</span>
-            <span class="value">{{ fleetUtilization()!.summary.efficient_trips }} / {{ fleetUtilization()!.summary.capacity_compliant_trips }}</span>
+            <span class="value">{{ fleetUtilization()!.summary.efficient_trips }} / {{ fleetUtilization()!.summary.total_trips }}</span>
           </div>
           <div class="stat">
             <span class="label">{{ 'analytics.near_capacity_trips' | translate }}</span>
@@ -203,27 +203,83 @@
 
   <!-- Fleet Utilization Tab -->
   <section *ngIf="selectedTab() === 'fleet' && !loading() && !error()" class="tab-content">
-    <div *ngIf="fleetUtilization()" class="fleet-container">
+    <div *ngIf="fleetUtilization()" class="fleet-container plan-vs-actual-container">
+      <div class="card">
+        <h3>{{ 'analytics.trip_breakdown' | translate }}</h3>
+        <div class="stats-grid">
+          <div class="stat"><span class="label">{{ 'analytics.total_trips' | translate }}</span><span class="value">{{ fleetUtilization()!.summary.total_trips }}</span></div>
+          <div class="stat"><span class="label">{{ 'analytics.capacity_compliant_trips' | translate }}</span><span class="value">{{ fleetUtilization()!.summary.capacity_compliant_trips }}</span></div>
+          <div class="stat"><span class="label">{{ 'analytics.overloaded_trips' | translate }}</span><span class="value">{{ fleetUtilization()!.summary.overloaded_trips }}</span></div>
+          <div class="stat"><span class="label">{{ 'analytics.underutilized_trips' | translate }}</span><span class="value">{{ fleetUtilization()!.summary.underutilized_trips }}</span></div>
+          <div class="stat"><span class="label">{{ 'analytics.normal_trips' | translate }}</span><span class="value">{{ fleetUtilization()!.summary.normal_trips }}</span></div>
+          <div class="stat"><span class="label">{{ 'analytics.efficient_trips' | translate }}</span><span class="value">{{ fleetUtilization()!.summary.efficient_trips }}</span></div>
+          <div class="stat"><span class="label">{{ 'analytics.near_capacity_trips' | translate }}</span><span class="value">{{ fleetUtilization()!.summary.near_capacity_trips }}</span></div>
+        </div>
+      </div>
       <div class="fleet-trips">
-        <div *ngFor="let trip of fleetUtilization()!.trips.slice(0, 10)" class="trip-card">
+        <article
+          *ngFor="let trip of fleetUtilization()!.trips"
+          class="trip-card"
+          role="button"
+          tabindex="0"
+          [attr.aria-label]="('analytics.view_trip_details' | translate) + ': ' + trip.vehicle_plate"
+          (click)="openTripDetails(trip)"
+          (keydown.enter)="openTripDetails(trip)"
+          (keydown.space)="$event.preventDefault(); openTripDetails(trip)"
+        >
           <div class="card-header">
-            <span class="trip-id">{{ trip.trip_id }}</span>
+            <span class="trip-id">{{ trip.vehicle_plate }}</span>
             <span class="utilization-badge" [class]="trip.utilization_level.toLowerCase()">
               {{ ('analytics.utilization_level.' + trip.utilization_level) | translate }}
             </span>
           </div>
 
           <div class="trip-info">
-            <p><strong>{{ 'analytics.vehicle' | translate }}:</strong> {{ trip.vehicle_plate }}</p>
+            <p><strong>{{ 'analytics.planned_date' | translate }}:</strong> {{ trip.planned_date | date:'mediumDate' }}</p>
             <p><strong>{{ 'analytics.orders' | translate }}:</strong> {{ trip.orders_count }} | <strong>{{ 'analytics.stops' | translate }}:</strong> {{ trip.stops_count }}</p>
             <p><strong>{{ 'analytics.load' | translate }}:</strong> {{ formatPercentage(trip.load_kg_percent) }} kg | {{ formatPercentage(trip.load_m3_percent) }} m³</p>
           </div>
 
           <div class="recommendation">{{ trip.recommendation }}</div>
-        </div>
+        </article>
       </div>
     </div>
   </section>
+
+  <ng-container *ngIf="selectedTrip() as trip">
+    <div class="trip-modal-backdrop" (click)="closeTripDetails()"></div>
+    <section
+      class="trip-details-modal"
+      role="dialog"
+      aria-modal="true"
+      [attr.aria-labelledby]="'trip-details-title'"
+    >
+      <div class="trip-modal-header">
+        <div>
+          <h2 id="trip-details-title">{{ 'analytics.trip_details' | translate }}</h2>
+          <p>{{ trip.vehicle_plate }}</p>
+        </div>
+        <button type="button" class="trip-modal-close" [attr.aria-label]="'analytics.close' | translate" (click)="closeTripDetails()">&times;</button>
+      </div>
+
+      <dl class="trip-details-list">
+        <div class="trip-detail-wide"><dt>{{ 'analytics.trip_uuid' | translate }}</dt><dd>{{ trip.trip_id }}</dd></div>
+        <div><dt>{{ 'analytics.planned_date' | translate }}</dt><dd>{{ trip.planned_date | date:'mediumDate' }}</dd></div>
+        <div><dt>{{ 'analytics.utilization' | translate }}</dt><dd>{{ ('analytics.utilization_level.' + trip.utilization_level) | translate }}</dd></div>
+        <div class="trip-detail-wide"><dt>{{ 'analytics.vehicle_uuid' | translate }}</dt><dd>{{ trip.vehicle_id }}</dd></div>
+        <div><dt>{{ 'analytics.vehicle_plate' | translate }}</dt><dd>{{ trip.vehicle_plate }}</dd></div>
+        <div><dt>{{ 'analytics.orders' | translate }}</dt><dd>{{ trip.orders_count }}</dd></div>
+        <div><dt>{{ 'analytics.stops' | translate }}</dt><dd>{{ trip.stops_count }}</dd></div>
+        <div><dt>{{ 'analytics.total_weight' | translate }}</dt><dd>{{ formatNumber(trip.total_kg, 2) }} kg</dd></div>
+        <div><dt>{{ 'analytics.total_volume' | translate }}</dt><dd>{{ formatNumber(trip.total_m3, 2) }} m³</dd></div>
+        <div><dt>{{ 'analytics.weight_capacity' | translate }}</dt><dd>{{ formatNumber(trip.vehicle_capacity_kg, 2) }} kg</dd></div>
+        <div><dt>{{ 'analytics.volume_capacity' | translate }}</dt><dd>{{ formatNumber(trip.vehicle_capacity_m3, 2) }} m³</dd></div>
+        <div><dt>{{ 'analytics.weight_load' | translate }}</dt><dd>{{ formatPercentage(trip.load_kg_percent) }}</dd></div>
+        <div><dt>{{ 'analytics.volume_load' | translate }}</dt><dd>{{ formatPercentage(trip.load_m3_percent) }}</dd></div>
+        <div class="trip-detail-wide"><dt>{{ 'analytics.recommendation' | translate }}</dt><dd>{{ trip.recommendation }}</dd></div>
+      </dl>
+    </section>
+  </ng-container>
 
   <!-- Plan vs Actual Tab -->
   <section *ngIf="selectedTab() === 'plan-vs-actual' && !loading() && !error()" class="tab-content">
@@ -258,7 +314,7 @@
           <thead>
             <tr>
               <th>{{ 'analytics.driver' | translate }}</th>
-              <th>{{ 'analytics.stops' | translate }}</th>
+              <th>{{ 'analytics.evaluated_stops' | translate }}</th>
               <th>{{ 'analytics.on_time_percent' | translate }}</th>
               <th>{{ 'analytics.avg_delay_min' | translate }}</th>
               <th>{{ 'analytics.avg_service_min' | translate }}</th>
@@ -318,6 +374,10 @@
               <span class="label">{{ 'analytics.amortization' | translate }}:</span>
               <span class="value">{{ formatCurrency(costs()!.amortization_cost) }}</span>
             </p>
+            <p>
+              <span class="label">{{ 'analytics.extra_cost' | translate }}:</span>
+              <span class="value">{{ formatCurrency(costs()!.total_extra_cost) }}</span>
+            </p>
           </div>
         </div>
 
@@ -346,7 +406,7 @@
           <thead>
             <tr>
               <th>{{ 'analytics.trip_id' | translate }}</th>
-              <th>{{ 'analytics.planned_km' | translate }}</th>
+              <th>{{ 'analytics.actual_km' | translate }}</th>
               <th>{{ 'analytics.orders' | translate }}</th>
               <th>{{ 'analytics.total_cost' | translate }}</th>
               <th>{{ 'analytics.cost_per_order' | translate }}</th>
@@ -356,7 +416,7 @@
           <tbody>
             <tr *ngFor="let trip of costs()!.top_expensive_trips">
               <td>{{ trip.trip_id }}</td>
-              <td>{{ formatNumber(trip.planned_km, 2) }}</td>
+              <td>{{ formatNumber(trip.actual_km, 2) }}</td>
               <td>{{ trip.orders_count }}</td>
               <td>{{ formatCurrency(trip.total_cost) }}</td>
               <td>{{ formatCurrency(trip.cost_per_order) }}</td>
@@ -370,8 +430,62 @@
 
   <!-- Incidents Tab -->
   <section *ngIf="selectedTab() === 'incidents' && !loading() && !error()" class="tab-content">
-    <div class="incidents-container">
-      <p class="info-message">{{ 'analytics.incidents_placeholder' | translate }}</p>
+    <div *ngIf="incidentImpact() as impact" class="plan-vs-actual-container">
+      <div class="summary-cards">
+        <div class="card">
+          <h4>{{ 'analytics.incident_overview' | translate }}</h4>
+          <div class="stats-grid">
+            <div class="stat"><span class="label">{{ 'analytics.total_incidents' | translate }}</span><span class="value">{{ impact.total_incidents }}</span></div>
+            <div class="stat"><span class="label">{{ 'analytics.minor_incidents' | translate }}</span><span class="value">{{ impact.minor_incidents }}</span></div>
+            <div class="stat"><span class="label">{{ 'analytics.major_incidents' | translate }}</span><span class="value">{{ impact.major_incidents }}</span></div>
+            <div class="stat"><span class="label">{{ 'analytics.incident_rate' | translate }}</span><span class="value">{{ formatPercentage(impact.incident_rate) }}</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4>{{ 'analytics.recovery_overview' | translate }}</h4>
+          <div class="stats-grid">
+            <div class="stat"><span class="label">{{ 'analytics.interrupted_trips' | translate }}</span><span class="value">{{ impact.interrupted_trips }}</span></div>
+            <div class="stat"><span class="label">{{ 'analytics.recovery_trips' | translate }}</span><span class="value">{{ impact.recovery_trips_created }}</span></div>
+            <div class="stat"><span class="label">{{ 'analytics.major_incident_rate' | translate }}</span><span class="value">{{ formatPercentage(impact.major_incident_rate) }}</span></div>
+            <div class="stat"><span class="label">{{ 'analytics.avg_recovery_time' | translate }}</span><span class="value">{{ impact.average_recovery_time_minutes === null ? '-' : formatNumber(impact.average_recovery_time_minutes, 1) + ' ' + ('analytics.minutes_short' | translate) }}</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div *ngIf="impact.major_incidents_detail.length; else noMajorIncidents" class="breakdown-section">
+        <h4>{{ 'analytics.major_incident_details' | translate }}</h4>
+        <table class="breakdown-table">
+          <thead>
+            <tr>
+              <th>{{ 'analytics.occurred_at' | translate }}</th>
+              <th>{{ 'analytics.status' | translate }}</th>
+              <th>{{ 'analytics.affected_orders' | translate }}</th>
+              <th>{{ 'analytics.affected_stops' | translate }}</th>
+              <th>{{ 'analytics.estimated_delay' | translate }}</th>
+              <th>{{ 'analytics.extra_recovery_cost' | translate }}</th>
+              <th>{{ 'analytics.impact' | translate }}</th>
+              <th>{{ 'analytics.recommendation' | translate }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let incident of impact.major_incidents_detail">
+              <td>{{ incident.created_at | date:'medium' }}</td>
+              <td>{{ (incident.resolved_at ? 'analytics.resolved' : 'analytics.open') | translate }}</td>
+              <td>{{ incident.affected_orders_count }}</td>
+              <td>{{ incident.affected_stops_count }}</td>
+              <td>{{ incident.estimated_delay_minutes }} {{ 'analytics.minutes_short' | translate }}</td>
+              <td>{{ formatCurrency(incident.extra_recovery_cost) }}</td>
+              <td>{{ incident.impact_level }} ({{ incident.incident_impact_score }})</td>
+              <td>{{ incident.recommendation }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <ng-template #noMajorIncidents>
+        <div class="incidents-container"><p class="info-message">{{ 'analytics.no_major_incidents' | translate }}</p></div>
+      </ng-template>
     </div>
   </section>
 </div>

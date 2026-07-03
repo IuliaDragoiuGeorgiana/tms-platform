@@ -9,6 +9,7 @@ Run from the backend directory:
 """
 
 import hashlib
+import random
 import secrets
 from datetime import date, datetime, time, timedelta, timezone
 
@@ -51,73 +52,37 @@ from app.models.trip_stop import (
 from app.models.user import RoleEnum, User
 from app.models.vehicle import FuelTypeEnum, Vehicle, VehicleStatusEnum, VehicleTypeEnum
 from app.services.trip_cost_service import upsert_trip_cost
+from app.services.planning_service import (
+    _build_capacity_by_day_minutes,
+    _build_estimated_minutes_by_order,
+    _repair_deferred_distribution,
+)
+from app.services.strategy_service import distribute_orders_by_strategy
 
 
 PASSWORD = "helloWorld"
 TODAY = date.today()
-NOW = datetime.now(timezone.utc)
 
 
-COMPANY_SCENARIOS = [
-    {
-        "name": "Atlas Freight",
-        "slug": "atlas-freight",
-        "domain": "atlasfreight.com",
-        "plan": PlanEnum.PRO,
-        "depot": ("Cluj", "Cluj-Napoca", "Strada Fabricii", "10", 46.7860, 23.6200),
-        "plate_prefix": "CJ",
-        "zones": [
-            ("Cluj", "Cluj-Napoca", 46.7712, 23.6236),
-            ("Cluj", "Floresti", 46.7468, 23.4936),
-            ("Bihor", "Oradea", 47.0465, 21.9189),
-            ("Alba", "Alba Iulia", 46.0686, 23.5715),
-        ],
-    },
-    {
-        "name": "Rapid Courier",
-        "slug": "rapid-courier",
-        "domain": "rapidcourier.com",
-        "plan": PlanEnum.PRO,
-        "depot": ("Bucuresti", "Bucuresti", "Soseaua Industriilor", "42", 44.4268, 26.1025),
-        "plate_prefix": "B",
-        "available_drivers": 3,
-        "zones": [
-            ("Bucuresti", "Bucuresti", 44.4268, 26.1025),
-            ("Ilfov", "Otopeni", 44.5500, 26.0667),
-            ("Prahova", "Ploiesti", 44.9361, 26.0129),
-            ("Arges", "Pitesti", 44.8565, 24.8692),
-        ],
-    },
-    {
-        "name": "Cold Chain Logistics",
-        "slug": "cold-chain-logistics",
-        "domain": "coldchainlogistics.com",
-        "plan": PlanEnum.BASIC,
-        "depot": ("Timis", "Timisoara", "Calea Sagului", "115", 45.7489, 21.2087),
-        "plate_prefix": "TM",
-        "zones": [
-            ("Timis", "Timisoara", 45.7489, 21.2087),
-            ("Arad", "Arad", 46.1866, 21.3123),
-            ("Hunedoara", "Deva", 45.8833, 22.9000),
-            ("Caras-Severin", "Resita", 45.3008, 21.8892),
-        ],
-    },
-    {
-        "name": "Moldova Distribution",
-        "slug": "moldova-distribution",
-        "domain": "moldovadistribution.com",
-        "plan": PlanEnum.BASIC,
-        "depot": ("Iasi", "Iasi", "Bulevardul Chimiei", "7", 47.1585, 27.6014),
-        "plate_prefix": "IS",
-        "zones": [
-            ("Iasi", "Iasi", 47.1585, 27.6014),
-            ("Bacau", "Bacau", 46.5670, 26.9146),
-            ("Neamt", "Piatra Neamt", 46.9296, 26.3770),
-            ("Suceava", "Suceava", 47.6514, 26.2556),
-        ],
-    },
-]
-
+COMPANY_SCENARIOS = [{
+    "name": "Atlas Freight",
+    "slug": "atlas-freight",
+    "domain": "atlasfreight.com",
+    "plan": PlanEnum.PRO,
+    "depot": ("Cluj", "Cluj-Napoca", "Strada Fabricii", "10", 46.7860, 23.6200),
+    "plate_prefix": "CJ",
+    # One available driver intentionally constrains the comparison to 540
+    # estimated minutes per day. Other drivers still populate operational UI.
+    "available_drivers": 1,
+    "zones": [
+        ("Cluj", "Cluj-Napoca", 46.7712, 23.6236),
+        ("Cluj", "Floresti", 46.7468, 23.4936),
+        ("Bihor", "Oradea", 47.0465, 21.9189),
+        ("Alba", "Alba Iulia", 46.0686, 23.5715),
+        ("Mures", "Targu Mures", 46.5425, 24.5575),
+        ("Sibiu", "Sibiu", 45.7983, 24.1256),
+    ],
+}]
 
 def dt(day_offset: int, hour: int, minute: int = 0) -> datetime:
     return datetime.combine(
@@ -326,58 +291,37 @@ def create_order(
     problem_reason = "Adresa necesita confirmare" if is_problematic else None
 
     if status == OrderStatusEnum.PENDING:
-        # Strategy comparison playground:
-        # - 1..8: urgent but geographically sparse
-        # - 9..20: dense, low-priority city work
-        # - 21..26: urgent and dense
-        # - 27..32: bulky/long-haul orders that stress capacity/time
-        # The three strategies should now disagree on which orders are placed
-        # first in a 2-3 day planning interval.
+        # Minimal deterministic strategy-comparison set (six orders):
+        # 1-2 are high-priority satellite work; 3-6 form a dense local cluster.
+        # Estimated minutes are 255/225 for satellite and 195 for local orders.
+        # With one 540-minute driver/day, the first-day selections are:
+        # GREEDY: 1+2, DENSITY: two local, HYBRID: 1+one local.
         earliest_offset = 0
+        was_postponed = False
         is_problematic = False
         problem_reason = None
-
-        if local_sequence <= 8:
-            # Small urgent parcels - high priority
-            priority = PriorityEnum.CRITIC if local_sequence % 2 else PriorityEnum.URGENT
-            deadline_offset = 0 if local_sequence <= 5 else 1
-            flexibility_days = 1
-            kg = 120 + (local_sequence % 5) * 30  # 120-270kg
-            m3 = max(0.6, kg / 180 + (local_sequence % 3) * 0.1)
-            pickup_service_minutes = 40
-            delivery_service_minutes = 45
-            cargo_type = MarfaTypeEnum.FRAGIL if local_sequence % 3 else MarfaTypeEnum.ADR
-        elif local_sequence <= 20:
-            # Standard city work - normal priority
+        if local_sequence == 1:
+            priority = PriorityEnum.CRITIC
+            deadline_offset = 0
+            flexibility_days = 0
+            kg, m3 = 420, 2.4
+            pickup_service_minutes = delivery_service_minutes = 105
+            cargo_type = MarfaTypeEnum.ADR
+        elif local_sequence == 2:
+            priority = PriorityEnum.URGENT
+            deadline_offset = 2
+            flexibility_days = 2
+            kg, m3 = 360, 2.0
+            pickup_service_minutes = delivery_service_minutes = 90
+            cargo_type = MarfaTypeEnum.FRAGIL
+        else:
             priority = PriorityEnum.NORMAL
             deadline_offset = 2
             flexibility_days = 2
-            kg = 100 + (local_sequence % 6) * 25  # 100-250kg
-            m3 = max(0.5, kg / 200 + (local_sequence % 3) * 0.05)
-            pickup_service_minutes = 35
-            delivery_service_minutes = 40
-            cargo_type = MarfaTypeEnum.STANDARD
-        elif local_sequence <= 26:
-            # Urgent/perishable items - higher priority
-            priority = PriorityEnum.CRITIC if local_sequence % 3 == 0 else PriorityEnum.URGENT
-            deadline_offset = 1
-            flexibility_days = 1
-            kg = 150 + (local_sequence % 6) * 30  # 150-330kg
-            m3 = max(0.8, kg / 180 + (local_sequence % 3) * 0.1)
-            pickup_service_minutes = 45
-            delivery_service_minutes = 45
-            cargo_type = MarfaTypeEnum.PERISABIL
-            was_postponed = local_sequence % 5 == 0
-        else:
-            # Bulk consolidation orders
-            priority = PriorityEnum.NORMAL if local_sequence % 3 else PriorityEnum.URGENT
-            deadline_offset = 2
-            flexibility_days = 2
-            kg = 200 + (local_sequence % 7) * 50  # 200-550kg
-            m3 = max(1.0, kg / 200 + (local_sequence % 4) * 0.15)
-            pickup_service_minutes = 75
-            delivery_service_minutes = 80
-            cargo_type = MarfaTypeEnum.STANDARD
+            kg = 180 + local_sequence * 12
+            m3 = 1.1 + (local_sequence - 3) * 0.12
+            pickup_service_minutes = delivery_service_minutes = 75
+            cargo_type = MarfaTypeEnum.PERISABIL if local_sequence == 6 else MarfaTypeEnum.STANDARD
 
     if status in (OrderStatusEnum.DELIVERED, OrderStatusEnum.FAILED):
         deadline_offset = -((sequence % 12) + 1)
@@ -398,9 +342,9 @@ def create_order(
     delivery_lat = delivery_lat + ((sequence % 9) - 4) * 0.007
     delivery_lon = delivery_lon + ((sequence % 6) - 3) * 0.007
 
-    if status == OrderStatusEnum.PENDING and 9 <= local_sequence <= 26:
-        dense_jitter = ((local_sequence % 9) - 4) * 0.0012
-        secondary_jitter = ((local_sequence % 7) - 3) * 0.001
+    if status == OrderStatusEnum.PENDING and local_sequence >= 3:
+        dense_jitter = (local_sequence - 4.5) * 0.0008
+        secondary_jitter = ((local_sequence % 2) * 2 - 1) * 0.0007
         pickup_lat = pickup_zone[2] + dense_jitter
         pickup_lon = pickup_zone[3] + secondary_jitter
         delivery_lat = delivery_zone[2] + dense_jitter + 0.0015
@@ -456,6 +400,12 @@ def create_order(
         was_postponed=was_postponed,
         problem_reason=problem_reason,
     )
+    if status == OrderStatusEnum.PENDING:
+        # Avoid route-solver waiting time masking the strategy comparison.
+        order.pickup_time_window_start = time(6, 0)
+        order.pickup_time_window_end = time(20, 0)
+        order.delivery_time_window_start = time(6, 0)
+        order.delivery_time_window_end = time(20, 0)
     db.add(order)
     return order
 
@@ -470,8 +420,25 @@ def create_trip_with_orders(
     planned_day: date,
     status: TripStatusEnum,
     trip_index: int,
+    lateness_minutes: int = 2,
+    service_delta_minutes: int = 0,
+    extra_cost: float = 0,
+    failed_delivery_indexes: set[int] | None = None,
+    planned_km: float | None = None,
+    actual_km: float | None = None,
 ) -> Trip:
     start_hour = 7 + trip_index % 3
+    failed_delivery_indexes = failed_delivery_indexes or set()
+    planned_distance = planned_km if planned_km is not None else min(500, 95 + trip_index * 17)
+    actual_distance = actual_km
+    if status == TripStatusEnum.COMPLETED and actual_distance is None:
+        actual_distance = round(planned_distance * (1.03 + (trip_index % 4) * 0.025), 2)
+    planned_duration = 220 + len(orders) * 18 + trip_index % 5 * 8
+    actual_duration = (
+        planned_duration + max(0, lateness_minutes) + service_delta_minutes * len(orders)
+        if status == TripStatusEnum.COMPLETED
+        else None
+    )
     trip = Trip(
         company_id=company_id,
         driver_id=driver.id,
@@ -479,14 +446,13 @@ def create_trip_with_orders(
         planning_session_id=planning_session.id,
         planned_date=planned_day,
         status=status,
-        planned_km=min(500, 95 + trip_index * 17),
-        actual_km=(
-            min(500, 103 + trip_index * 19)
-            if status == TripStatusEnum.COMPLETED
-            else None
-        ),
-        planned_duration_min=260 + trip_index * 18,
-        actual_duration_min=(278 + trip_index * 21) if status == TripStatusEnum.COMPLETED else None,
+        planned_km=planned_distance,
+        actual_km=actual_distance if status == TripStatusEnum.COMPLETED else None,
+        planned_duration_min=planned_duration,
+        actual_duration_min=actual_duration,
+        vehicle_plate_snapshot=vehicle.plate,
+        vehicle_capacity_kg_snapshot=vehicle.capacity_kg,
+        vehicle_capacity_m3_snapshot=vehicle.capacity_m3,
         started_at=dt((planned_day - TODAY).days, start_hour) if status != TripStatusEnum.PROPOSED else None,
         completed_at=dt((planned_day - TODAY).days, start_hour + 6) if status == TripStatusEnum.COMPLETED else None,
     )
@@ -503,6 +469,8 @@ def create_trip_with_orders(
         stop_status = StopStatusEnum.PENDING
         if status == TripStatusEnum.COMPLETED:
             stop_status = StopStatusEnum.COMPLETED
+        pickup_arrival = pickup_eta + timedelta(minutes=lateness_minutes)
+        pickup_service = max(1, int(order.pickup_service_minutes or 10) + service_delta_minutes)
 
         db.add(
             TripStop(
@@ -511,11 +479,13 @@ def create_trip_with_orders(
                 sequence=sequence,
                 stop_type=StopTypeEnum.PICKUP,
                 eta_planned=pickup_eta,
-                eta_actual=pickup_eta + timedelta(minutes=4) if stop_status == StopStatusEnum.COMPLETED else None,
-                arrival_time=pickup_eta + timedelta(minutes=2) if stop_status == StopStatusEnum.COMPLETED else None,
-                departure_time=pickup_eta + timedelta(minutes=8) if stop_status == StopStatusEnum.COMPLETED else None,
+                eta_actual=pickup_arrival if stop_status == StopStatusEnum.COMPLETED else None,
+                arrival_time=pickup_arrival if stop_status == StopStatusEnum.COMPLETED else None,
+                departure_time=pickup_arrival + timedelta(minutes=pickup_service) if stop_status == StopStatusEnum.COMPLETED else None,
                 status=stop_status,
                 notes="Pickup confirmat" if stop_status == StopStatusEnum.COMPLETED else None,
+                order_kg_snapshot=order.kg,
+                order_m3_snapshot=order.m3,
             )
         )
         sequence += 1
@@ -526,9 +496,18 @@ def create_trip_with_orders(
         delivery_eta = delivery_start + timedelta(minutes=30 + idx * 15)
         stop_status = StopStatusEnum.PENDING
         if status == TripStatusEnum.COMPLETED:
-            stop_status = StopStatusEnum.COMPLETED
+            stop_status = (
+                StopStatusEnum.FAILED
+                if idx in failed_delivery_indexes
+                else StopStatusEnum.COMPLETED
+            )
         elif status == TripStatusEnum.INTERRUPTED and idx > len(orders) // 2:
             stop_status = StopStatusEnum.SKIPPED
+
+        delivery_arrival = delivery_eta + timedelta(minutes=lateness_minutes)
+        delivery_service = max(1, int(order.delivery_service_minutes or 10) + service_delta_minutes)
+        if stop_status == StopStatusEnum.FAILED:
+            order.status = OrderStatusEnum.FAILED
 
         db.add(
             TripStop(
@@ -537,17 +516,28 @@ def create_trip_with_orders(
                 sequence=sequence,
                 stop_type=StopTypeEnum.DELIVERY,
                 eta_planned=delivery_eta,
-                eta_actual=delivery_eta + timedelta(minutes=5) if stop_status == StopStatusEnum.COMPLETED else None,
-                arrival_time=delivery_eta + timedelta(minutes=2) if stop_status == StopStatusEnum.COMPLETED else None,
-                departure_time=delivery_eta + timedelta(minutes=15) if stop_status == StopStatusEnum.COMPLETED else None,
+                eta_actual=delivery_arrival if status == TripStatusEnum.COMPLETED else None,
+                arrival_time=delivery_arrival if status == TripStatusEnum.COMPLETED else None,
+                departure_time=delivery_arrival + timedelta(minutes=delivery_service) if status == TripStatusEnum.COMPLETED else None,
                 status=stop_status,
-                failure_reason=FailureReasonEnum.OTHER if stop_status == StopStatusEnum.SKIPPED else None,
-                notes="Livrare finalizata" if stop_status == StopStatusEnum.COMPLETED else None,
+                failure_reason=(
+                    FailureReasonEnum.ABSENT
+                    if stop_status == StopStatusEnum.FAILED
+                    else FailureReasonEnum.OTHER if stop_status == StopStatusEnum.SKIPPED else None
+                ),
+                notes=(
+                    "Destinatar absent"
+                    if stop_status == StopStatusEnum.FAILED
+                    else "Livrare finalizata" if stop_status == StopStatusEnum.COMPLETED else None
+                ),
+                order_kg_snapshot=order.kg,
+                order_m3_snapshot=order.m3,
             )
         )
         sequence += 1
 
-    extra_cost = 250 if status == TripStatusEnum.INTERRUPTED else 0
+    if status == TripStatusEnum.INTERRUPTED and not extra_cost:
+        extra_cost = 250
     upsert_trip_cost(
         db,
         trip,
@@ -563,156 +553,345 @@ def create_historical_kpi_data(
     clients: list[User],
     drivers: list[Driver],
     vehicles: list[Vehicle],
-    planning_session: PlanningSession,
+    planning_sessions: list[PlanningSession],
     scenario: dict,
     company_index: int,
 ) -> dict:
-    historical_orders = []
-    delivered_orders = []
-    failed_orders = []
+    rng = random.Random(20260703 + company_index)
+    historical_orders: list[Order] = []
+    historical_trips: list[Trip] = []
+    failed_orders: list[Order] = []
+    sequence = company_index * 100000
+    utilization_targets = [0.24, 0.46, 0.67, 0.83, 0.94, 1.07]
+    lateness_pattern = [-6, 3, 14, 27, 43, 68]
 
-    daily_order_counts = {
-        -1: 12,
-        -2: 4,
-        -3: 35,
-        -4: 2,
-        -5: 18,
-        -6: 7,
-        -7: 28,
-        -9: 44,
-        -11: 9,
-        -14: 31,
-        -18: 6,
-        -23: 22,
-        -27: 14,
-    }
-    historical_sequence = 0
+    # Thirty-six completed trips across roughly ten weeks. The seeded load,
+    # delay, service, distance and cost patterns deliberately cover every
+    # analytics bucket rather than producing uniform demo charts.
+    for trip_idx in range(36):
+        day_offset = -(2 + trip_idx * 2)
+        planned_day = TODAY + timedelta(days=day_offset)
+        order_count = rng.randint(4, 8)
+        vehicle = vehicles[trip_idx % len(vehicles)]
+        target = utilization_targets[trip_idx % len(utilization_targets)]
+        target_kg = float(vehicle.capacity_kg) * target
+        target_m3 = float(vehicle.capacity_m3) * target * rng.uniform(0.88, 0.98)
+        trip_orders = []
 
-    for day_offset, order_count in daily_order_counts.items():
-        for daily_index in range(1, order_count + 1):
-            historical_sequence += 1
-
-            if daily_index % 17 == 0:
-                status = OrderStatusEnum.CANCELLED
-            elif daily_index % 9 == 0:
-                status = OrderStatusEnum.FAILED
-            else:
-                status = OrderStatusEnum.DELIVERED
-
-            created_at = dt(
-                day_offset,
-                6 + (daily_index % 13),
-                (daily_index * 11 + company_index * 7) % 60,
-            )
-            sequence = company_index * 10000 + historical_sequence
-            local_sequence = 200 + historical_sequence
-
-            pickup_zone = scenario["zones"][daily_index % len(scenario["zones"])]
-            delivery_zone = scenario["zones"][(daily_index + company_index) % len(scenario["zones"])]
-
+        for order_idx in range(order_count):
+            sequence += 1
+            pickup_zone = rng.choice(scenario["zones"])
+            delivery_zone = rng.choice(scenario["zones"])
+            created_at = dt(day_offset - rng.randint(1, 4), rng.randint(7, 17), rng.randint(0, 59))
             order = create_order(
                 db=db,
                 company_id=company.id,
-                client_id=clients[daily_index % len(clients)].id,
-                ref_prefix=f"{scenario['slug'].upper().replace('-', '')}HIST",
+                client_id=clients[(trip_idx + order_idx) % len(clients)].id,
+                ref_prefix="ATL-HIST",
                 sequence=sequence,
-                local_sequence=local_sequence,
+                local_sequence=1000 + sequence,
                 pickup_zone=pickup_zone,
                 delivery_zone=delivery_zone,
-                status=status,
+                status=OrderStatusEnum.DELIVERED,
             )
+            order.kg = round(target_kg / order_count * rng.uniform(0.94, 1.06), 2)
+            order.m3 = round(target_m3 / order_count * rng.uniform(0.94, 1.06), 2)
             order.created_at = created_at
-            order.updated_at = created_at + timedelta(hours=2)
-            order.delivery_deadline = created_at.date() + timedelta(days=2)
-            order.earliest_delivery_date = created_at.date()
+            order.updated_at = created_at + timedelta(hours=rng.randint(4, 18))
+            order.delivery_deadline = planned_day
+            order.earliest_delivery_date = planned_day - timedelta(days=2)
             order.flexibility_days = 2
-            order.assigned_delivery_date = created_at.date() + timedelta(days=1)
-            order.was_postponed = daily_index % 11 == 0
-
-            if status == OrderStatusEnum.DELIVERED:
-                delivered_orders.append(order)
-            elif status == OrderStatusEnum.FAILED:
-                failed_orders.append(order)
-
+            order.assigned_delivery_date = planned_day
+            order.pickup_service_minutes = rng.randint(8, 22)
+            order.delivery_service_minutes = rng.randint(10, 28)
+            order.was_postponed = trip_idx % 9 == 0 and order_idx == 0
             historical_orders.append(order)
+            trip_orders.append(order)
 
-    db.flush()
-
-    historical_trips = []
-    for trip_idx in range(6):
-        # Use 6-8 orders per historical trip for realistic utilization
-        start_idx = trip_idx * 7
-        end_idx = min(start_idx + 7, len(delivered_orders))
-        trip_orders = delivered_orders[start_idx:end_idx]
-        if not trip_orders:
-            continue
-
-        planned_day = TODAY - timedelta(days=trip_idx * 4 + company_index)
-        # Select vehicle based on order weights (realistic capacity matching)
-        selected_vehicle = select_vehicle_for_orders(trip_orders, vehicles, trip_idx)
+        db.flush()
+        lateness = lateness_pattern[trip_idx % len(lateness_pattern)]
+        planned_distance = round(72 + trip_idx * 6.5 + rng.uniform(-12, 18), 2)
+        actual_distance = round(planned_distance * [0.94, 1.01, 1.07, 1.16][trip_idx % 4], 2)
+        failed_indexes = {order_count - 1} if trip_idx % 8 == 7 else set()
         trip = create_trip_with_orders(
             db=db,
             company_id=company.id,
             driver=drivers[trip_idx % len(drivers)],
-            vehicle=selected_vehicle,
-            planning_session=planning_session,
+            vehicle=vehicle,
+            planning_session=planning_sessions[trip_idx % len(planning_sessions)],
             orders=trip_orders,
             planned_day=planned_day,
             status=TripStatusEnum.COMPLETED,
             trip_index=trip_idx,
+            lateness_minutes=lateness,
+            service_delta_minutes=[-3, 0, 4, 9][trip_idx % 4],
+            extra_cost=(180 + trip_idx * 12) if trip_idx % 7 == 0 else 0,
+            failed_delivery_indexes=failed_indexes,
+            planned_km=planned_distance,
+            actual_km=actual_distance,
         )
-        trip.created_at = dt((planned_day - TODAY).days, 6, 30)
-        trip.started_at = dt((planned_day - TODAY).days, 7, 15)
-        trip.completed_at = dt((planned_day - TODAY).days, 15, 10)
+        trip.created_at = dt(day_offset - 1, 16, 30)
+        trip.started_at = dt(day_offset, 7 + trip_idx % 3, 0)
+        trip.completed_at = dt(day_offset, 14 + trip_idx % 4, 20)
         historical_trips.append(trip)
+        failed_orders.extend(trip_orders[index] for index in failed_indexes)
+
+    # Additional resolved old orders vary daily KPI/status charts but have no
+    # planning eligibility because every deadline is safely in the past.
+    for loose_idx in range(72):
+        sequence += 1
+        day_offset = -rng.randint(3, 90)
+        status = OrderStatusEnum.FAILED if loose_idx % 3 else OrderStatusEnum.CANCELLED
+        created_at = dt(day_offset, rng.randint(7, 18), rng.randint(0, 59))
+        order = create_order(
+            db=db,
+            company_id=company.id,
+            client_id=clients[loose_idx % len(clients)].id,
+            ref_prefix="ATL-ARCHIVE",
+            sequence=sequence,
+            local_sequence=2000 + loose_idx,
+            pickup_zone=rng.choice(scenario["zones"]),
+            delivery_zone=rng.choice(scenario["zones"]),
+            status=status,
+        )
+        order.created_at = created_at
+        order.updated_at = created_at + timedelta(hours=rng.randint(2, 12))
+        order.delivery_deadline = created_at.date() + timedelta(days=1)
+        order.earliest_delivery_date = created_at.date()
+        order.assigned_delivery_date = created_at.date() + timedelta(days=1)
+        order.flexibility_days = 1
+        historical_orders.append(order)
+        if status == OrderStatusEnum.FAILED:
+            failed_orders.append(order)
 
     db.flush()
 
-    if historical_trips:
-        for incident_idx, trip in enumerate(historical_trips[:3], start=1):
-            incident_day_offset = (trip.planned_date - TODAY).days
-            db.add(
-                Incident(
-                    trip_id=trip.id,
-                    driver_id=trip.driver_id,
-                    vehicle_id=trip.vehicle_id,
-                    type=IncidentTypeEnum.MINOR if incident_idx < 3 else IncidentTypeEnum.MAJOR,
-                    description=(
-                        "Incident istoric rezolvat pentru KPI-uri "
-                        f"#{incident_idx}."
-                    ),
-                    location_lat=scenario["zones"][incident_idx % len(scenario["zones"])][2],
-                    location_lon=scenario["zones"][incident_idx % len(scenario["zones"])][3],
-                    created_at=dt(incident_day_offset, 10, 20),
-                    resolved_at=dt(incident_day_offset, 11 + incident_idx, 5),
-                    extra_cost_estimated=80 * incident_idx,
-                    impact_analysis={
-                        "delay_minutes": 20 * incident_idx,
-                        "recovery_needed": False,
-                        "historical": True,
-                    },
-                )
-            )
+    incident_count = 0
+    for incident_idx, trip in enumerate(historical_trips[::3], start=1):
+        incident_count += 1
+        day_offset = (trip.planned_date - TODAY).days
+        major = incident_idx % 4 == 0
+        unresolved = incident_idx in (1, 5)
+        zone = scenario["zones"][incident_idx % len(scenario["zones"])]
+        db.add(Incident(
+            trip_id=trip.id,
+            driver_id=trip.driver_id,
+            vehicle_id=trip.vehicle_id,
+            type=IncidentTypeEnum.MAJOR if major else IncidentTypeEnum.MINOR,
+            description=(
+                "Defecțiune cu replanificare și întârziere semnificativă."
+                if major else "Incident operațional minor în timpul livrării."
+            ),
+            location_lat=zone[2],
+            location_lon=zone[3],
+            created_at=dt(day_offset, 10 + incident_idx % 5, 20),
+            resolved_at=None if unresolved else dt(day_offset, 12 + incident_idx % 5, 10),
+            extra_cost_estimated=round(90 + incident_idx * 85.5, 2),
+            impact_analysis={
+                "affected_orders": 1 + incident_idx % 5,
+                "affected_stops": 2 + incident_idx % 7,
+                "delay_minutes": 18 + incident_idx * 17,
+                "extra_recovery_km": 8 + incident_idx * 3,
+                "recovery_needed": major,
+                "historical": True,
+            },
+        ))
 
-    for idx, order in enumerate(failed_orders, start=1):
-        db.add(
-            Notification(
-                company_id=company.id,
-                user_id=order.client_id,
-                order_id=order.id,
-                type="FAILED_DELIVERY",
-                channel=NotificationChannelEnum.EMAIL,
-                content=f"Livrarea istorica {order.order_ref} a esuat.",
-                sent_at=order.created_at + timedelta(hours=5),
-                delivered_at=order.created_at + timedelta(hours=5, minutes=2),
-                status=NotificationStatusEnum.DELIVERED,
-            )
-        )
+    for idx, order in enumerate(failed_orders[:36], start=1):
+        db.add(Notification(
+            company_id=company.id,
+            user_id=order.client_id,
+            order_id=order.id,
+            type="FAILED_DELIVERY",
+            channel=[
+                NotificationChannelEnum.EMAIL,
+                NotificationChannelEnum.SMS,
+                NotificationChannelEnum.PUSH,
+            ][idx % 3],
+            content=f"Livrarea istorică {order.order_ref} a eșuat.",
+            sent_at=order.created_at + timedelta(hours=5),
+            delivered_at=order.created_at + timedelta(hours=5, minutes=2),
+            status=NotificationStatusEnum.DELIVERED,
+        ))
 
     return {
         "historical_orders": len(historical_orders),
         "historical_trips": len(historical_trips),
+        "historical_incidents": incident_count,
     }
+
+
+def validate_planning_showcase(
+    db,
+    pending_orders: list[Order],
+    available_drivers: list[Driver],
+) -> dict[str, list[list[str]]]:
+    """Fail the seed if the three showcase distributions ever converge."""
+    days = [TODAY + timedelta(days=offset) for offset in range(3)]
+    capacity = _build_capacity_by_day_minutes(days, available_drivers)
+    estimates = _build_estimated_minutes_by_order(db, pending_orders)
+    previews = {}
+
+    for strategy in (
+        PlanningStrategyEnum.GREEDY_DEADLINE,
+        PlanningStrategyEnum.MAX_DENSITY,
+        PlanningStrategyEnum.HYBRID,
+    ):
+        result = distribute_orders_by_strategy(
+            orders=pending_orders,
+            strategy=strategy,
+            date_start=days[0],
+            date_end=days[-1],
+            capacity_by_day_minutes=capacity,
+            estimated_minutes_by_order=estimates,
+        )
+        result = _repair_deferred_distribution(
+            distribution=result,
+            date_start=days[0],
+            date_end=days[-1],
+            estimated_minutes_by_order=estimates,
+        )
+        previews[strategy.value] = [
+            [order.order_ref for order in result["days"][day]]
+            for day in days
+        ]
+
+    signatures = {tuple(tuple(day) for day in preview) for preview in previews.values()}
+    if len(signatures) != 3:
+        raise RuntimeError("Planning showcase invalid: strategy distributions are not distinct")
+
+    return previews
+
+
+def create_recovery_incident_scenarios(
+    db,
+    company: Company,
+    clients: list[User],
+    drivers: list[Driver],
+    vehicles: list[Vehicle],
+    planning_session: PlanningSession,
+    scenario: dict,
+) -> tuple[list[Trip], list[Incident], list[Order]]:
+    """Create interrupted trips with valid cargo states for every recovery path."""
+    recovery_trips = []
+    recovery_incidents = []
+    recovery_orders = []
+    scenario_modes = ("PICKED_UP", "UNPICKED", "MIXED")
+
+    for scenario_idx, mode in enumerate(scenario_modes):
+        trip_orders = []
+        for order_idx in range(4):
+            sequence = 3000 + scenario_idx * 10 + order_idx
+            zone = scenario["zones"][(scenario_idx + order_idx) % 2]
+            order = create_order(
+                db=db,
+                company_id=company.id,
+                client_id=clients[(scenario_idx + order_idx) % len(clients)].id,
+                ref_prefix="ATL-RECOVERY",
+                sequence=sequence,
+                local_sequence=3000 + scenario_idx * 10 + order_idx,
+                pickup_zone=scenario["zones"][0],
+                delivery_zone=zone,
+                status=(
+                    OrderStatusEnum.PLANNED
+                    if mode == "UNPICKED"
+                    else OrderStatusEnum.IN_DELIVERY
+                ),
+            )
+            order.kg = 140 + scenario_idx * 30 + order_idx * 20
+            order.m3 = round(0.7 + scenario_idx * 0.15 + order_idx * 0.1, 2)
+            order.delivery_deadline = TODAY + timedelta(days=2)
+            order.earliest_delivery_date = TODAY
+            order.flexibility_days = 2
+            order.assigned_delivery_date = TODAY
+            order.pickup_time_window_start = time(6, 0)
+            order.pickup_time_window_end = time(19, 0)
+            order.delivery_time_window_start = time(6, 0)
+            order.delivery_time_window_end = time(19, 0)
+            order.pickup_service_minutes = 10 + order_idx
+            order.delivery_service_minutes = 12 + order_idx
+            order.is_problematic = False
+            trip_orders.append(order)
+            recovery_orders.append(order)
+
+        db.flush()
+        vehicle = vehicles[-(scenario_idx + 1)]
+        vehicle.status = VehicleStatusEnum.AVARIAT
+        trip = create_trip_with_orders(
+            db=db,
+            company_id=company.id,
+            driver=drivers[4 + scenario_idx],
+            vehicle=vehicle,
+            planning_session=planning_session,
+            orders=trip_orders,
+            planned_day=TODAY,
+            status=TripStatusEnum.INTERRUPTED,
+            trip_index=50 + scenario_idx,
+            extra_cost=300 + scenario_idx * 125,
+            planned_km=48 + scenario_idx * 14,
+        )
+        db.flush()
+
+        stops_by_order = {}
+        for stop in trip.stops:
+            stops_by_order.setdefault(stop.order_id, {})[stop.stop_type] = stop
+
+        for order_idx, order in enumerate(trip_orders):
+            pickup = stops_by_order[order.id][StopTypeEnum.PICKUP]
+            delivery = stops_by_order[order.id][StopTypeEnum.DELIVERY]
+            pickup.status = StopStatusEnum.PENDING
+            delivery.status = StopStatusEnum.PENDING
+            pickup.failure_reason = None
+            delivery.failure_reason = None
+            pickup.notes = None
+            delivery.notes = None
+
+            pickup_completed = mode == "PICKED_UP" or (mode == "MIXED" and order_idx < 2)
+            delivery_completed = mode == "MIXED" and order_idx == 0
+
+            if pickup_completed:
+                pickup.status = StopStatusEnum.COMPLETED
+                pickup.arrival_time = pickup.eta_planned
+                pickup.departure_time = pickup.eta_planned + timedelta(
+                    minutes=order.pickup_service_minutes
+                )
+                pickup.eta_actual = pickup.arrival_time
+                order.status = OrderStatusEnum.IN_DELIVERY
+            else:
+                order.status = OrderStatusEnum.PLANNED
+
+            if delivery_completed:
+                delivery.status = StopStatusEnum.COMPLETED
+                delivery.arrival_time = delivery.eta_planned
+                delivery.departure_time = delivery.eta_planned + timedelta(
+                    minutes=order.delivery_service_minutes
+                )
+                delivery.eta_actual = delivery.arrival_time
+                order.status = OrderStatusEnum.DELIVERED
+
+        incident = Incident(
+            trip_id=trip.id,
+            driver_id=trip.driver_id,
+            vehicle_id=trip.vehicle_id,
+            type=IncidentTypeEnum.MAJOR,
+            description={
+                "PICKED_UP": "Defecțiune după încărcare; marfa trebuie transferată și livrată.",
+                "UNPICKED": "Vehicul indisponibil înainte de ridicare; comenzile pot fi recuperate sau amânate.",
+                "MIXED": "Defecțiune în timpul rutei; există marfă livrată, la bord și încă neridicată.",
+            }[mode],
+            location_lat=scenario["zones"][1][2] + scenario_idx * 0.004,
+            location_lon=scenario["zones"][1][3] + scenario_idx * 0.004,
+            created_at=dt(0, 8 + scenario_idx, 30),
+            resolved_at=None,
+            recovery_trip_id=None,
+            extra_cost_estimated=300 + scenario_idx * 125,
+            impact_analysis=None,
+        )
+        db.add(incident)
+        recovery_trips.append(trip)
+        recovery_incidents.append(incident)
+
+    return recovery_trips, recovery_incidents, recovery_orders
 
 
 def seed_company(db, scenario: dict, company_index: int) -> dict:
@@ -722,19 +901,20 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
     manager = create_user(db, f"manager@{domain}", f"{scenario['name']} Manager", RoleEnum.MANAGER, company.id)
     dispatcher = create_user(db, f"dispatcher@{domain}", f"{scenario['name']} Dispatcher", RoleEnum.DISPECER, company.id)
     backup_dispatcher = create_user(db, f"dispatcher2@{domain}", f"{scenario['name']} Dispatcher 2", RoleEnum.DISPECER, company.id)
+    third_dispatcher = create_user(db, f"dispatcher3@{domain}", f"{scenario['name']} Dispatcher 3", RoleEnum.DISPECER, company.id)
     clients = [
         create_user(db, f"client{i}@{domain}", f"{scenario['name']} Client {i}", RoleEnum.CLIENT, company.id)
-        for i in range(1, 7)
+        for i in range(1, 9)
     ]
     driver_users = [
         create_user(db, f"driver{i}@{domain}", f"{scenario['name']} Driver {i}", RoleEnum.SOFER, company.id)
-        for i in range(1, 9)
+        for i in range(1, 11)
     ]
     db.flush()
 
     vehicles = [
         create_vehicle(db, company.id, scenario["plate_prefix"], i)
-        for i in range(1, 11)
+        for i in range(1, 13)
     ]
     db.flush()
 
@@ -823,23 +1003,20 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
 
     orders = []
     statuses = (
-        [OrderStatusEnum.PENDING] * 32
-        + [OrderStatusEnum.PLANNED] * 12
-        + [OrderStatusEnum.DELIVERED] * 10
+        [OrderStatusEnum.PENDING] * 6
+        + [OrderStatusEnum.PLANNED] * 10
+        + [OrderStatusEnum.DELIVERED] * 8
         + [OrderStatusEnum.FAILED] * 4
-        + [OrderStatusEnum.IN_DELIVERY] * 3
-        + [OrderStatusEnum.CANCELLED] * 2
+        + [OrderStatusEnum.IN_DELIVERY] * 6
+        + [OrderStatusEnum.CANCELLED] * 3
     )
     for sequence, status in enumerate(statuses, start=1):
-        if status == OrderStatusEnum.PENDING and sequence <= 8:
-            pickup_zone = scenario["zones"][sequence % len(scenario["zones"])]
-            delivery_zone = scenario["zones"][(sequence + 2) % len(scenario["zones"])]
-        elif status == OrderStatusEnum.PENDING and sequence <= 26:
+        if status == OrderStatusEnum.PENDING and sequence <= 2:
+            pickup_zone = scenario["zones"][1]
+            delivery_zone = scenario["zones"][1]
+        elif status == OrderStatusEnum.PENDING:
             pickup_zone = scenario["zones"][0]
             delivery_zone = scenario["zones"][0]
-        elif status == OrderStatusEnum.PENDING:
-            pickup_zone = scenario["zones"][sequence % len(scenario["zones"])]
-            delivery_zone = scenario["zones"][-1]
         else:
             pickup_zone = scenario["zones"][sequence % len(scenario["zones"])]
             if sequence % 9 == 0:
@@ -865,27 +1042,28 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
     db.flush()
 
     planning_sessions = []
-    for offset, strategy in enumerate(
-        [
-            PlanningStrategyEnum.GREEDY_DEADLINE,
-            PlanningStrategyEnum.MAX_DENSITY,
-            PlanningStrategyEnum.HYBRID,
-            PlanningStrategyEnum.AD_HOC,
-        ]
-    ):
+    historical_strategies = [
+        PlanningStrategyEnum.GREEDY_DEADLINE,
+        PlanningStrategyEnum.MAX_DENSITY,
+        PlanningStrategyEnum.HYBRID,
+        PlanningStrategyEnum.AD_HOC,
+    ]
+    for offset in range(12):
+        strategy = historical_strategies[offset % len(historical_strategies)]
+        session_end = TODAY - timedelta(days=2 + offset * 6)
         session = PlanningSession(
             company_id=company.id,
-            created_by=dispatcher.id,
-            date_range_start=TODAY + timedelta(days=offset - 2),
-            date_range_end=TODAY + timedelta(days=offset + 2),
+            created_by=[dispatcher.id, backup_dispatcher.id, third_dispatcher.id][offset % 3],
+            date_range_start=session_end - timedelta(days=2),
+            date_range_end=session_end,
             strategy=strategy,
-            status=PlanningStatusEnum.APPROVED if offset < 3 else PlanningStatusEnum.PROPOSED,
-            total_orders=18 + offset * 4,
+            status=PlanningStatusEnum.APPROVED,
+            total_orders=14 + offset % 5,
             optimization_stats={
                 "seeded": True,
-                "planned_trips": 3 + offset,
-                "deferred_orders": offset,
-                "strategy_note": f"Demo data for {strategy.value}",
+                "planned_trips": 2 + offset % 4,
+                "deferred_orders": offset % 3,
+                "strategy_note": f"Historical demo for {strategy.value}",
             },
         )
         db.add(session)
@@ -898,10 +1076,24 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
         clients=clients,
         drivers=drivers,
         vehicles=vehicles,
-        planning_session=planning_sessions[0],
+        planning_sessions=planning_sessions,
         scenario=scenario,
         company_index=company_index,
     )
+
+    db.add(PlanningSession(
+        company_id=company.id,
+        created_by=dispatcher.id,
+        date_range_start=TODAY,
+        date_range_end=TODAY + timedelta(days=2),
+        strategy=PlanningStrategyEnum.HYBRID,
+        status=PlanningStatusEnum.DRAFT,
+        total_orders=6,
+        optimization_stats={
+            "seeded": True,
+            "purpose": "Three-strategy comparison workspace",
+        },
+    ))
 
     orders_by_status = {
         status: [order for order in orders if order.status == status]
@@ -916,10 +1108,8 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
     trips = []
     trip_statuses = [
         TripStatusEnum.COMPLETED,
-        TripStatusEnum.COMPLETED,
         TripStatusEnum.APPROVED,
         TripStatusEnum.IN_PROGRESS,
-        TripStatusEnum.INTERRUPTED,
     ]
     for trip_index, trip_status in enumerate(trip_statuses):
         if trip_status == TripStatusEnum.COMPLETED:
@@ -933,12 +1123,6 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
                 orders_by_status[OrderStatusEnum.IN_DELIVERY]
                 + orders_by_status[OrderStatusEnum.PLANNED]
             )[:6]
-        elif trip_status == TripStatusEnum.INTERRUPTED:
-            # Use 5 orders for interrupted trip
-            trip_orders = (
-                orders_by_status[OrderStatusEnum.FAILED]
-                + orders_by_status[OrderStatusEnum.PLANNED]
-            )[:5]
         else:
             # Use 5-6 orders per APPROVED trip
             trip_orders = orders_by_status[OrderStatusEnum.PLANNED][
@@ -946,11 +1130,11 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
             ]
         if not trip_orders:
             continue
-        planned_day = (
-            TODAY - timedelta(days=trip_index)
-            if trip_status == TripStatusEnum.COMPLETED
-            else TODAY + timedelta(days=trip_index - 3)
-        )
+        planned_day = {
+            TripStatusEnum.COMPLETED: TODAY - timedelta(days=1),
+            TripStatusEnum.APPROVED: TODAY + timedelta(days=1),
+            TripStatusEnum.IN_PROGRESS: TODAY,
+        }[trip_status]
         # Select vehicle based on order weights (realistic capacity matching)
         selected_vehicle = select_vehicle_for_orders(trip_orders, vehicles, trip_index)
         trip = create_trip_with_orders(
@@ -967,29 +1151,20 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
         trips.append(trip)
     db.flush()
 
+    recovery_trips, recovery_incidents, recovery_orders = create_recovery_incident_scenarios(
+        db=db,
+        company=company,
+        clients=clients,
+        drivers=drivers,
+        vehicles=vehicles,
+        planning_session=planning_sessions[0],
+        scenario=scenario,
+    )
+    trips.extend(recovery_trips)
+    orders.extend(recovery_orders)
+    db.flush()
+
     if trips:
-        major_trip = trips[-1]
-        recovery_trip = trips[1] if len(trips) > 1 else None
-        db.add(
-            Incident(
-                trip_id=major_trip.id,
-                driver_id=major_trip.driver_id,
-                vehicle_id=major_trip.vehicle_id,
-                type=IncidentTypeEnum.MAJOR,
-                description="Avarie vehicul cu impact asupra livrarilor ramase.",
-                location_lat=scenario["zones"][0][2] + 0.02,
-                location_lon=scenario["zones"][0][3] + 0.02,
-                created_at=dt(-1, 11, 20),
-                resolved_at=None,
-                recovery_trip_id=recovery_trip.id if recovery_trip else None,
-                extra_cost_estimated=750,
-                impact_analysis={
-                    "affected_orders": 4,
-                    "delay_minutes": 160,
-                    "recovery_needed": True,
-                },
-            )
-        )
         db.add(
             Incident(
                 trip_id=trips[0].id,
@@ -1046,7 +1221,7 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
             )
         )
 
-    for offset in range(1, 8):
+    for offset in range(1, 31):
         db.add(
             DailyReport(
                 company_id=company.id,
@@ -1055,39 +1230,54 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
                 sent_to_email=f"manager@{domain}",
                 generated_at=dt(-offset, 18, 30),
                 kpi_snapshot={
-                    "orders": 34 + offset,
-                    "delivered": 28 + offset,
-                    "failed": offset % 3,
-                    "planned_km": 1200 + offset * 75,
+                    "orders": 14 + (offset * 7) % 29,
+                    "delivered": 11 + (offset * 5) % 23,
+                    "failed": offset % 5,
+                    "planned_km": 620 + (offset * 137) % 1250,
                 },
             )
         )
 
-    db.add(
-        AuditLog(
+    audit_actions = [
+        "PLANNING_GENERATED",
+        "TRIP_APPROVED",
+        "VEHICLE_ASSIGNED",
+        "ORDER_UPDATED",
+        "INCIDENT_REVIEWED",
+        "COST_CONFIG_UPDATED",
+    ]
+    for audit_idx in range(24):
+        db.add(AuditLog(
             company_id=company.id,
-            user_id=manager.id,
-            action="SEED_RICH_DEMO_DATA",
-            entity_type="Company",
+            user_id=[manager.id, dispatcher.id, backup_dispatcher.id, third_dispatcher.id][audit_idx % 4],
+            action=audit_actions[audit_idx % len(audit_actions)],
+            entity_type=["PlanningSession", "Trip", "Vehicle", "Order", "Incident", "SystemConfig"][audit_idx % 6],
             entity_id=company.id,
             old_value=None,
-            new_value={"orders": len(orders), "trips": len(trips)},
+            new_value={"seeded": True, "sequence": audit_idx + 1},
             ip_address="127.0.0.1",
             user_agent="seed_rich_demo_data.py",
-            timestamp=NOW,
-        )
-    )
+            timestamp=dt(-(audit_idx % 20), 8 + audit_idx % 9, audit_idx * 7 % 60),
+        ))
+
+    db.flush()
+    pending_orders = [order for order in orders if order.status == OrderStatusEnum.PENDING]
+    available_drivers = [driver for driver in drivers if driver.status == DriverStatusEnum.AVAILABLE]
+    planning_previews = validate_planning_showcase(db, pending_orders, available_drivers)
 
     return {
         "company": company,
         "manager_email": f"manager@{domain}",
-        "users": 1 + 2 + len(clients) + len(driver_users),
+        "users": 1 + 3 + len(clients) + len(driver_users),
         "vehicles": len(vehicles),
         "drivers": len(drivers),
         "orders": len(orders),
         "trips": len(trips),
         "historical_orders": historical_summary["historical_orders"],
         "historical_trips": historical_summary["historical_trips"],
+        "historical_incidents": historical_summary["historical_incidents"],
+        "recovery_incidents": len(recovery_incidents),
+        "planning_previews": planning_previews,
     }
 
 
@@ -1125,9 +1315,14 @@ def seed_rich_demo_data() -> None:
                 f"{summary['orders']} orders, "
                 f"{summary['trips']} trips, "
                 f"{summary['historical_orders']} historical orders, "
-                f"{summary['historical_trips']} historical trips"
+                f"{summary['historical_trips']} historical trips, "
+                f"{summary['historical_incidents']} historical incidents, "
+                f"{summary['recovery_incidents']} actionable recovery incidents"
             )
             print(f"  {summary['manager_email']}")
+            print("  Planning comparison: today through today + 2 days (6 eligible orders)")
+            for strategy, preview in summary["planning_previews"].items():
+                print(f"    {strategy}: {preview}")
 
     except Exception:
         db.rollback()

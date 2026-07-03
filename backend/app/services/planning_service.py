@@ -1227,6 +1227,9 @@ def _plan_day(
                 status=TripStatusEnum.PROPOSED,
                 planned_km=round(total_km, 1),
                 planned_duration_min=round(total_minutes),
+                vehicle_plate_snapshot=vehicle.plate,
+                vehicle_capacity_kg_snapshot=vehicle.capacity_kg,
+                vehicle_capacity_m3_snapshot=vehicle.capacity_m3,
             )
 
             db.add(trip)
@@ -1290,6 +1293,8 @@ def _plan_day(
                     stop_type=stop_type,
                     eta_planned=eta,
                     status=StopStatusEnum.PENDING,
+                    order_kg_snapshot=order.kg,
+                    order_m3_snapshot=order.m3,
                 )
 
                 db.add(trip_stop)
@@ -1951,6 +1956,7 @@ def change_trip_vehicle(
 
     old_vehicle_id = trip.vehicle_id
     trip.vehicle_id = new_vehicle_id
+    trip.capture_vehicle_snapshot(new_vehicle)
     upsert_trip_cost(db, trip)
     db.commit()
     db.refresh(trip)
@@ -2313,6 +2319,8 @@ def _reoptimize_trip_with_orders(
             stop_type=stop_type,
             eta_planned=eta,
             status=StopStatusEnum.PENDING,
+            order_kg_snapshot=order.kg,
+            order_m3_snapshot=order.m3,
         )
 
         db.add(trip_stop)
@@ -2950,6 +2958,9 @@ def create_ad_hoc_trip(
         status=TripStatusEnum.PROPOSED,
         planned_km=round(total_km, 1),
         planned_duration_min=round(total_minutes),
+        vehicle_plate_snapshot=vehicle.plate,
+        vehicle_capacity_kg_snapshot=vehicle.capacity_kg,
+        vehicle_capacity_m3_snapshot=vehicle.capacity_m3,
     )
 
     if not dry_run:
@@ -2997,6 +3008,8 @@ def create_ad_hoc_trip(
                 stop_type=stop_type,
                 eta_planned=eta,
                 status=StopStatusEnum.PENDING,
+                order_kg_snapshot=order.kg,
+                order_m3_snapshot=order.m3,
             )
 
             db.add(trip_stop)
@@ -3424,6 +3437,9 @@ def create_adhoc_planning_session(
         status=TripStatusEnum.PROPOSED,
         planned_km=round(total_km, 1),
         planned_duration_min=round(total_minutes),
+        vehicle_plate_snapshot=vehicle.plate,
+        vehicle_capacity_kg_snapshot=vehicle.capacity_kg,
+        vehicle_capacity_m3_snapshot=vehicle.capacity_m3,
     )
 
     if not dry_run:
@@ -3471,6 +3487,8 @@ def create_adhoc_planning_session(
                 stop_type=stop_type,
                 eta_planned=eta,
                 status=StopStatusEnum.PENDING,
+                order_kg_snapshot=order.kg,
+                order_m3_snapshot=order.m3,
             )
 
             db.add(trip_stop)

@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from sqlalchemy import Integer, Enum, ForeignKey, Date, DateTime, Numeric
+from sqlalchemy import Integer, Enum, ForeignKey, Date, DateTime, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, UUIDPrimaryKey, TimestampMixin
@@ -38,6 +38,9 @@ class Trip(UUIDPrimaryKey, TimestampMixin, Base):
     actual_km: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     planned_duration_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     actual_duration_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vehicle_plate_snapshot: Mapped[str | None] = mapped_column(String, nullable=True)
+    vehicle_capacity_kg_snapshot: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    vehicle_capacity_m3_snapshot: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     recovery_for_trip_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("trips.id"), nullable=True
     )
@@ -74,3 +77,9 @@ class Trip(UUIDPrimaryKey, TimestampMixin, Base):
     @property
     def vehicle_label(self) -> str | None:
         return self.vehicle.plate if self.vehicle else None
+
+    def capture_vehicle_snapshot(self, vehicle) -> None:
+        """Persist the assigned vehicle data used by historical analytics."""
+        self.vehicle_plate_snapshot = vehicle.plate
+        self.vehicle_capacity_kg_snapshot = vehicle.capacity_kg
+        self.vehicle_capacity_m3_snapshot = vehicle.capacity_m3

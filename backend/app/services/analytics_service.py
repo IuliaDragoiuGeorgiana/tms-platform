@@ -4,6 +4,7 @@ Service de analytics pentru business insights și planning intelligence.
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
@@ -21,6 +22,7 @@ from app.services.trip_cost_service import calculate_cost_components
 
 # Praguri și configurări
 DEFAULT_DELAY_THRESHOLD_MINUTES = 30
+BUSINESS_TIMEZONE = ZoneInfo("Europe/Bucharest")
 
 
 # ============== Helper Functions ==============
@@ -61,17 +63,26 @@ def get_zone_from_order(order: Order) -> str:
     return "UNKNOWN"
 
 
+def get_stop_cargo(stop) -> tuple[float, float]:
+    """Return the immutable cargo snapshot, falling back for legacy rows."""
+    order = stop.order
+    kg = getattr(stop, "order_kg_snapshot", None)
+    m3 = getattr(stop, "order_m3_snapshot", None)
+    return (
+        money_to_float(kg if kg is not None else order.kg),
+        money_to_float(m3 if m3 is not None else order.m3),
+    )
+
+
 def calculate_peak_onboard_load(stops) -> tuple[float, float]:
     """Calculează încărcătura maximă simultană de-a lungul rutei."""
     ordered_stops = sorted(stops, key=lambda stop: stop.sequence)
     first_stop_by_order = {}
-    orders_by_id = {}
 
     for stop in ordered_stops:
         if not stop.order_id or not stop.order:
             continue
         first_stop_by_order.setdefault(stop.order_id, stop)
-        orders_by_id[stop.order_id] = stop.order
 
     # A delivery-only order is assumed to be loaded before departure.
     onboard = {
@@ -79,24 +90,25 @@ def calculate_peak_onboard_load(stops) -> tuple[float, float]:
         for order_id, stop in first_stop_by_order.items()
         if stop.stop_type == StopTypeEnum.DELIVERY
     }
-    current_kg = sum(money_to_float(orders_by_id[order_id].kg) for order_id in onboard)
-    current_m3 = sum(money_to_float(orders_by_id[order_id].m3) for order_id in onboard)
+    current_kg = sum(get_stop_cargo(first_stop_by_order[order_id])[0] for order_id in onboard)
+    current_m3 = sum(get_stop_cargo(first_stop_by_order[order_id])[1] for order_id in onboard)
     peak_kg = current_kg
     peak_m3 = current_m3
 
     for stop in ordered_stops:
         if not stop.order_id or not stop.order:
             continue
+        cargo_kg, cargo_m3 = get_stop_cargo(stop)
         if stop.stop_type == StopTypeEnum.PICKUP and stop.order_id not in onboard:
             onboard.add(stop.order_id)
-            current_kg += money_to_float(stop.order.kg)
-            current_m3 += money_to_float(stop.order.m3)
+            current_kg += cargo_kg
+            current_m3 += cargo_m3
             peak_kg = max(peak_kg, current_kg)
             peak_m3 = max(peak_m3, current_m3)
         elif stop.stop_type == StopTypeEnum.DELIVERY and stop.order_id in onboard:
             onboard.remove(stop.order_id)
-            current_kg = max(0.0, current_kg - money_to_float(stop.order.kg))
-            current_m3 = max(0.0, current_m3 - money_to_float(stop.order.m3))
+            current_kg = max(0.0, current_kg - cargo_kg)
+            current_m3 = max(0.0, current_m3 - cargo_m3)
 
     return peak_kg, peak_m3
 
@@ -139,6 +151,21 @@ def parse_date_range(start_date: date | None, end_date: date | None) -> tuple[da
     if not start_date:
         start_date = end_date - timedelta(days=29)
     return start_date, end_date
+
+
+def business_date_range_to_utc(start_date: date, end_date: date) -> tuple[datetime, datetime]:
+    """Convert inclusive Bucharest business dates to an exclusive UTC interval."""
+    start_datetime = datetime.combine(
+        start_date,
+        datetime.min.time(),
+        tzinfo=BUSINESS_TIMEZONE,
+    ).astimezone(timezone.utc)
+    end_datetime = datetime.combine(
+        end_date + timedelta(days=1),
+        datetime.min.time(),
+        tzinfo=BUSINESS_TIMEZONE,
+    ).astimezone(timezone.utc)
+    return start_datetime, end_datetime
 
 
 # ============== Zone Demand ==============
@@ -697,7 +724,7 @@ def get_fleet_utilization(db: Session, company_id, start_date: date | None, end_
             TripStatusEnum.IN_PROGRESS,
             TripStatusEnum.COMPLETED,
         ]),
-    ).all()
+    ).order_by(Trip.planned_date.desc(), Trip.id.asc()).all()
 
     trips_list = []
     stats = {
@@ -714,7 +741,10 @@ def get_fleet_utilization(db: Session, company_id, start_date: date | None, end_
         "compliant_trip_count": 0,
     }
 
-    vehicles = db.query(Vehicle).filter(Vehicle.company_id == company_id).all()
+    vehicles = db.query(Vehicle).filter(
+        Vehicle.company_id == company_id,
+        Vehicle.status.in_([VehicleStatusEnum.DISPONIBIL, VehicleStatusEnum.REZERVAT]),
+    ).all()
     for vehicle in vehicles:
         stats["all_vehicles"].add(vehicle.id)
 
@@ -725,35 +755,42 @@ def get_fleet_utilization(db: Session, company_id, start_date: date | None, end_
         stats["used_vehicles"].add(trip.vehicle_id)
 
         # Evită dublare: comenzi unice
-        unique_orders = {}
+        unique_order_stops = {}
         for stop in trip.stops:
-            if stop.order_id and stop.order_id not in unique_orders:
-                unique_orders[stop.order_id] = stop.order
+            if stop.order_id and stop.order and stop.order_id not in unique_order_stops:
+                unique_order_stops[stop.order_id] = stop
 
         total_kg = 0.0
         total_m3 = 0.0
-        orders_count = len(unique_orders)
+        orders_count = len(unique_order_stops)
         stops_count = len(trip.stops)
 
-        for order in unique_orders.values():
-            total_kg += money_to_float(order.kg)
-            total_m3 += money_to_float(order.m3)
+        for stop in unique_order_stops.values():
+            cargo_kg, cargo_m3 = get_stop_cargo(stop)
+            total_kg += cargo_kg
+            total_m3 += cargo_m3
 
         peak_kg, peak_m3 = calculate_peak_onboard_load(trip.stops)
 
-        cap_kg = money_to_float(trip.vehicle.capacity_kg)
-        cap_m3 = money_to_float(trip.vehicle.capacity_m3)
+        cap_kg_snapshot = trip.vehicle_capacity_kg_snapshot
+        cap_m3_snapshot = trip.vehicle_capacity_m3_snapshot
+        cap_kg = money_to_float(
+            cap_kg_snapshot if cap_kg_snapshot is not None else trip.vehicle.capacity_kg
+        )
+        cap_m3 = money_to_float(
+            cap_m3_snapshot if cap_m3_snapshot is not None else trip.vehicle.capacity_m3
+        )
 
         load_kg_percent = safe_divide(peak_kg, cap_kg, default=0.0) * 100 if cap_kg > 0 else 0.0
         load_m3_percent = safe_divide(peak_m3, cap_m3, default=0.0) * 100 if cap_m3 > 0 else 0.0
 
         stats["trip_count"] += 1
+        stats["total_kg_percent"] += load_kg_percent
+        stats["total_m3_percent"] += load_m3_percent
 
         # The fullest constraint determines whether the load fits the vehicle.
         effective_load_percent = max(load_kg_percent, load_m3_percent)
         if effective_load_percent <= 100:
-            stats["total_kg_percent"] += load_kg_percent
-            stats["total_m3_percent"] += load_m3_percent
             stats["compliant_trip_count"] += 1
 
         if effective_load_percent > 100:
@@ -781,7 +818,11 @@ def get_fleet_utilization(db: Session, company_id, start_date: date | None, end_
             "trip_id": str(trip.id),
             "planned_date": str(trip.planned_date),
             "vehicle_id": str(trip.vehicle_id) if trip.vehicle_id else None,
-            "vehicle_plate": trip.vehicle.plate if trip.vehicle else None,
+            "vehicle_plate": (
+                trip.vehicle_plate_snapshot
+                if trip.vehicle_plate_snapshot is not None
+                else trip.vehicle.plate
+            ),
             "orders_count": orders_count,
             "stops_count": stops_count,
             "total_kg": round(total_kg, 2),
@@ -795,9 +836,12 @@ def get_fleet_utilization(db: Session, company_id, start_date: date | None, end_
         })
 
     # Calculează summary
+    # A vehicle belongs in the denominator if it is currently operational or
+    # if it was actually used during the selected period.
+    stats["all_vehicles"].update(stats["used_vehicles"])
     unused_vehicles = len(stats["all_vehicles"] - stats["used_vehicles"])
-    avg_kg_percent = safe_divide(stats["total_kg_percent"], stats["compliant_trip_count"])
-    avg_m3_percent = safe_divide(stats["total_m3_percent"], stats["compliant_trip_count"])
+    avg_kg_percent = safe_divide(stats["total_kg_percent"], stats["trip_count"])
+    avg_m3_percent = safe_divide(stats["total_m3_percent"], stats["trip_count"])
 
     return {
         "trips": trips_list,
@@ -1044,16 +1088,7 @@ def get_unplanned_orders(db: Session, company_id, start_date: date | None, end_d
 def get_plan_vs_actual(db: Session, company_id, start_date: date | None, end_date: date | None) -> dict:
     """Compară planificarea cu execuția reală."""
     start_date, end_date = parse_date_range(start_date, end_date)
-    start_datetime = datetime.combine(
-        start_date,
-        datetime.min.time(),
-        tzinfo=timezone.utc,
-    )
-    end_datetime = datetime.combine(
-        end_date + timedelta(days=1),
-        datetime.min.time(),
-        tzinfo=timezone.utc,
-    )
+    start_datetime, end_datetime = business_date_range_to_utc(start_date, end_date)
 
     trips = db.query(Trip).filter(
         Trip.company_id == company_id,
@@ -1109,41 +1144,40 @@ def get_plan_vs_actual(db: Session, company_id, start_date: date | None, end_dat
             if not stop.order:
                 continue
 
-            by_zone[get_zone_from_order(stop.order)]["stops"] += 1
-
             # Exclude None driver/vehicle - folosește "Unassigned"
             driver_key = str(trip.driver_id) if trip.driver_id else "Unassigned"
             vehicle_key = str(trip.vehicle_id) if trip.vehicle_id else "Unassigned"
-
-            by_driver[driver_key]["stops"] += 1
-            by_vehicle[vehicle_key]["stops"] += 1
+            zone_key = get_zone_from_order(stop.order)
 
             if stop.eta_planned and stop.arrival_time:
                 trip_has_measured_stop = True
+                by_zone[zone_key]["stops"] += 1
+                by_driver[driver_key]["stops"] += 1
+                by_vehicle[vehicle_key]["stops"] += 1
+
                 # Calculează lateness (nu delay care poate fi negativ)
                 lateness = max(0, minutes_between(stop.eta_planned, stop.arrival_time))
-                # Track all delays for average calculation
                 delays.append(lateness)
+                by_zone[zone_key]["delays"].append(lateness)
+                by_driver[driver_key]["delays"].append(lateness)
+                by_vehicle[vehicle_key]["delays"].append(lateness)
 
                 if calculate_on_time(stop.arrival_time, stop.eta_planned, DEFAULT_DELAY_THRESHOLD_MINUTES):
                     on_time_count += 1
-                    by_zone[get_zone_from_order(stop.order)]["on_time"] += 1
+                    by_zone[zone_key]["on_time"] += 1
                     by_driver[driver_key]["on_time"] += 1
                     by_vehicle[vehicle_key]["on_time"] += 1
                 else:
                     late_count += 1
                     trip_has_late_stop = True
-                    by_zone[get_zone_from_order(stop.order)]["late"] += 1
-                    by_zone[get_zone_from_order(stop.order)]["delays"].append(lateness)
+                    by_zone[zone_key]["late"] += 1
                     by_driver[driver_key]["late"] += 1
-                    by_driver[driver_key]["delays"].append(lateness)
                     by_vehicle[vehicle_key]["late"] += 1
-                    by_vehicle[vehicle_key]["delays"].append(lateness)
 
             if stop.arrival_time and stop.departure_time:
                 actual_service_time = minutes_between(stop.arrival_time, stop.departure_time)
                 service_times.append(actual_service_time)
-                by_zone[get_zone_from_order(stop.order)]["service_times"].append(actual_service_time)
+                by_zone[zone_key]["service_times"].append(actual_service_time)
                 by_driver[driver_key]["service_times"].append(actual_service_time)
                 by_vehicle[vehicle_key]["service_times"].append(actual_service_time)
 
@@ -1352,16 +1386,7 @@ def get_service_time_accuracy(db: Session, company_id, start_date: date | None, 
 def get_costs(db: Session, company_id, start_date: date | None, end_date: date | None) -> dict:
     """Analizează costurile operaționale."""
     start_date, end_date = parse_date_range(start_date, end_date)
-    start_datetime = datetime.combine(
-        start_date,
-        datetime.min.time(),
-        tzinfo=timezone.utc,
-    )
-    end_datetime = datetime.combine(
-        end_date + timedelta(days=1),
-        datetime.min.time(),
-        tzinfo=timezone.utc,
-    )
+    start_datetime, end_datetime = business_date_range_to_utc(start_date, end_date)
 
     # Costurile reale sunt raportate după momentul finalizării, nu după data
     # la care cursa fusese planificată.
@@ -1554,14 +1579,14 @@ def get_costs(db: Session, company_id, start_date: date | None, end_date: date |
 
         expensive_trips.append({
             "trip_id": str(trip.id),
-            "planned_km": round(trip_km, 2),
+            "actual_km": round(trip_km, 2),
             "orders_count": orders_count,
             "total_cost": round(actual_cost, 2),
             "cost_per_order": round(cost_per_order_trip, 2),
             "recommendation": recommendation,
         })
 
-    expensive_trips.sort(key=lambda x: (x["cost_per_order"], x["total_cost"]), reverse=True)
+    expensive_trips.sort(key=lambda x: (x["total_cost"], x["cost_per_order"]), reverse=True)
     expensive_trips = expensive_trips[:10]
 
     return {
@@ -1593,13 +1618,14 @@ def get_costs(db: Session, company_id, start_date: date | None, end_date: date |
 def get_incident_impact(db: Session, company_id, start_date: date | None, end_date: date | None) -> dict:
     """Analizează impactul incidentelor."""
     start_date, end_date = parse_date_range(start_date, end_date)
+    start_datetime, end_datetime = business_date_range_to_utc(start_date, end_date)
 
     incidents = db.query(Incident).join(
         Trip, Incident.trip_id == Trip.id
     ).filter(
         Trip.company_id == company_id,
-        Incident.created_at >= datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc),
-        Incident.created_at <= datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc),
+        Incident.created_at >= start_datetime,
+        Incident.created_at < end_datetime,
     ).all()
 
     total_incidents = len(incidents)

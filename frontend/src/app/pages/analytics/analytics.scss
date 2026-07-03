@@ -245,7 +245,8 @@ td.recommendation {
 .zone-item,
 .stat,
 .zone-volume,
-.recommendation {
+.recommendation,
+.trip-details-list > div {
   padding: 1rem;
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -255,7 +256,8 @@ td.recommendation {
 .zone-header,
 .card-header,
 .metric,
-.costs p {
+.costs p,
+.trip-modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -327,6 +329,10 @@ td.recommendation {
 .trip-card,
 .cost-card {
   @extend .card;
+}
+
+.trip-card {
+  cursor: pointer;
 }
 
 .score-badge,
@@ -449,6 +455,62 @@ td.recommendation {
   white-space: nowrap;
 }
 
+.trip-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.trip-details-modal {
+  @extend .card;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 60;
+  width: min(760px, calc(100vw - 2rem));
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+  transform: translate(-50%, -50%);
+}
+
+.trip-modal-header {
+  margin-bottom: 1.5rem;
+}
+
+.trip-modal-header h2,
+.trip-modal-header p {
+  margin: 0;
+}
+
+.trip-modal-close {
+  border: 0;
+  background: transparent;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.trip-details-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0;
+}
+
+.trip-details-list dt {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.trip-details-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.trip-detail-wide {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 768px) {
   .analytics-container {
     padding: 1rem;
@@ -467,6 +529,10 @@ td.recommendation {
   .overview-grid,
   .zones-grid,
   .fleet-trips {
+    grid-template-columns: 1fr;
+  }
+
+  .trip-details-list {
     grid-template-columns: 1fr;
   }
 

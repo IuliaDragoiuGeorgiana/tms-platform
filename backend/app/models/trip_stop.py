@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from sqlalchemy import Integer, Enum, ForeignKey, DateTime, Text
+from sqlalchemy import Integer, Enum, ForeignKey, DateTime, Numeric, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, UUIDPrimaryKey
@@ -48,6 +48,8 @@ class TripStop(UUIDPrimaryKey, Base):
         Enum(FailureReasonEnum), nullable=True
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    order_kg_snapshot: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    order_m3_snapshot: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 
     # Relationships
     trip = relationship("Trip", back_populates="stops")
@@ -66,6 +68,11 @@ class TripStop(UUIDPrimaryKey, Base):
     @property
     def order_ref(self) -> str | None:
         return self.order.order_ref if self.order else None
+
+    def capture_order_snapshot(self, order) -> None:
+        """Persist the cargo dimensions used by historical analytics."""
+        self.order_kg_snapshot = order.kg
+        self.order_m3_snapshot = order.m3
 
     def __repr__(self) -> str:
         return f"<TripStop #{self.sequence} ({self.status.value})>"

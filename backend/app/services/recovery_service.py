@@ -788,6 +788,23 @@ def _infeasible_recovery_option(option_id: str, strategy_type: str, warning: str
         "warnings": [warning],
         "route": [],
     }
+
+
+def _best_recovery_option(options: list[dict]) -> dict | None:
+    """Return the best candidate while keeping driver/vehicle alternatives internal."""
+    if not options:
+        return None
+    return min(
+        options,
+        key=lambda option: (
+            option["late_orders_count"],
+            option["planned_duration_min"],
+            option["planned_km"],
+            option["estimated_total_cost"],
+        ),
+    )
+
+
 def build_incident_recovery_analysis(db: Session, incident: Incident) -> dict:
     all_analysis = _build_route_recovery_analysis(
         db, incident, "RECOVER_ALL_REMAINING"
@@ -795,15 +812,20 @@ def build_incident_recovery_analysis(db: Session, incident: Incident) -> dict:
     picked_analysis = _build_route_recovery_analysis(
         db, incident, "RECOVER_PICKED_UP_ONLY", picked_up_only=True
     )
-    options = list(all_analysis["options"])
-    if not all_analysis["options"]:
+    best_all_option = _best_recovery_option(all_analysis["options"])
+    options = []
+    if best_all_option:
+        options.append(best_all_option)
+    else:
         options.append(_infeasible_recovery_option(
             "all_unavailable",
             "RECOVER_ALL_REMAINING",
             "Nu există o variantă fezabilă pentru recuperarea tuturor comenzilor.",
         ))
-    options.extend(picked_analysis["options"])
-    if not picked_analysis["options"]:
+    best_picked_option = _best_recovery_option(picked_analysis["options"])
+    if best_picked_option:
+        options.append(best_picked_option)
+    else:
         options.append(_infeasible_recovery_option(
             "picked_up_unavailable",
             "RECOVER_PICKED_UP_ONLY",
@@ -871,8 +893,9 @@ def build_incident_recovery_analysis(db: Session, incident: Incident) -> dict:
                 "șofer, vehicul și rută fezabilă pentru comenzile amânate."
             )
 
-    if postpone_options:
-        options.extend(postpone_options)
+    best_postpone_option = _best_recovery_option(postpone_options)
+    if best_postpone_option:
+        options.append(best_postpone_option)
     else:
         options.append(
             _infeasible_recovery_option(
@@ -987,6 +1010,12 @@ def create_recovery_trip(db: Session, incident: Incident, selected_option: dict 
     planned_km = recommended_option["planned_km"]
     planned_duration_min = math.ceil(recommended_option["planned_duration_min"])
     route_stops = recommended_option["route"]
+    vehicle = db.query(Vehicle).filter(
+        Vehicle.id == vehicle_id,
+        Vehicle.company_id == original_trip.company_id,
+    ).first()
+    if not vehicle:
+        raise HTTPException(status_code=400, detail="Vehiculul de recuperare nu a fost găsit")
 
     recovery_trip = Trip(
         company_id=original_trip.company_id,
@@ -998,6 +1027,9 @@ def create_recovery_trip(db: Session, incident: Incident, selected_option: dict 
         recovery_for_trip_id=original_trip.id,
         planned_km=planned_km,
         planned_duration_min=planned_duration_min,
+        vehicle_plate_snapshot=vehicle.plate,
+        vehicle_capacity_kg_snapshot=vehicle.capacity_kg,
+        vehicle_capacity_m3_snapshot=vehicle.capacity_m3,
     )
 
     db.add(recovery_trip)
@@ -1018,6 +1050,13 @@ def create_recovery_trip(db: Session, incident: Incident, selected_option: dict 
         except (ValueError, TypeError):
             continue
 
+        order = db.query(Order).filter(
+            Order.id == order_id,
+            Order.company_id == original_trip.company_id,
+        ).first()
+        if not order:
+            continue
+
         eta_datetime = datetime.combine(
             original_trip.planned_date,
             datetime.min.time(),
@@ -1032,13 +1071,13 @@ def create_recovery_trip(db: Session, incident: Incident, selected_option: dict 
             eta_planned=eta_datetime,
             status=StopStatusEnum.PENDING,
             notes=f"Recovery stop from incident {incident.id}",
+            order_kg_snapshot=order.kg,
+            order_m3_snapshot=order.m3,
         )
         db.add(recovery_stop)
         real_sequence += 1
 
-    vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
-    if vehicle:
-        vehicle.status = VehicleStatusEnum.REZERVAT
+    vehicle.status = VehicleStatusEnum.REZERVAT
 
     # FIX #5: hasattr check pentru CANCELLED
     terminal_statuses = [
