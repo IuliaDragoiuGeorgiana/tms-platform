@@ -109,7 +109,9 @@
         <div class="order-card-header">
           <div>
             <span class="order-id">{{ order.order_ref }}</span>
+            @if (getOrderClientLabel(order)) {
             <p>{{ 'orders.client' | translate }}: {{ getOrderClientLabel(order) }}</p>
+            }
           </div>
 
           <div class="order-status-stack">
@@ -899,10 +901,13 @@
       <section class="details-section">
         <h3>{{ 'orders.details.identity' | translate }}</h3>
         <dl>
-          <div><dt>{{ 'orders.details.id' | translate }}</dt><dd>{{ selectedViewOrder.id }}</dd></div>
           <div><dt>{{ 'orders.details.order_ref' | translate }}</dt><dd>{{ selectedViewOrder.order_ref }}</dd></div>
-          <div><dt>{{ 'orders.details.company_id' | translate }}</dt><dd>{{ selectedViewOrder.company_id }}</dd></div>
+          @if (getOrderCompanyLabel(selectedViewOrder)) {
+          <div><dt>{{ 'orders.details.company_id' | translate }}</dt><dd>{{ getOrderCompanyLabel(selectedViewOrder) }}</dd></div>
+          }
+          @if (getOrderClientLabel(selectedViewOrder)) {
           <div><dt>{{ 'orders.client' | translate }}</dt><dd>{{ getOrderClientLabel(selectedViewOrder) }}</dd></div>
+          }
         </dl>
       </section>
 

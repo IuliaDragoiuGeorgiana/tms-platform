@@ -64,25 +64,79 @@ PASSWORD = "helloWorld"
 TODAY = date.today()
 
 
-COMPANY_SCENARIOS = [{
-    "name": "Atlas Freight",
-    "slug": "atlas-freight",
-    "domain": "atlasfreight.com",
-    "plan": PlanEnum.PRO,
-    "depot": ("Cluj", "Cluj-Napoca", "Strada Fabricii", "10", 46.7860, 23.6200),
-    "plate_prefix": "CJ",
-    # One available driver intentionally constrains the comparison to 540
-    # estimated minutes per day. Other drivers still populate operational UI.
-    "available_drivers": 1,
-    "zones": [
-        ("Cluj", "Cluj-Napoca", 46.7712, 23.6236),
-        ("Cluj", "Floresti", 46.7468, 23.4936),
-        ("Bihor", "Oradea", 47.0465, 21.9189),
-        ("Alba", "Alba Iulia", 46.0686, 23.5715),
-        ("Mures", "Targu Mures", 46.5425, 24.5575),
-        ("Sibiu", "Sibiu", 45.7983, 24.1256),
-    ],
-}]
+COMPANY_SCENARIOS = [
+    {
+        "name": "Rapid Curier",
+        "slug": "rapid-curier",
+        "domain": "rapidcurier.ro",
+        "plan": PlanEnum.PRO,
+        "depot": ("Cluj", "Cluj-Napoca", "Strada Fabricii", "10", 46.7860, 23.6200),
+        "plate_prefix": "RC",
+        # One available driver intentionally constrains the comparison to 540
+        # estimated minutes per day. Other drivers still populate operational UI.
+        "available_drivers": 1,
+        "inactive_driver_users": 3,
+        "zones": [
+            ("Cluj", "Cluj-Napoca", 46.7712, 23.6236),
+            ("Cluj", "Floresti", 46.7468, 23.4936),
+            ("Bihor", "Oradea", 47.0465, 21.9189),
+            ("Alba", "Alba Iulia", 46.0686, 23.5715),
+            ("Mures", "Targu Mures", 46.5425, 24.5575),
+            ("Sibiu", "Sibiu", 45.7983, 24.1256),
+        ],
+    },
+    {
+        "name": "Atlas Freight",
+        "slug": "atlas-freight",
+        "domain": "atlasfreight.com",
+        "plan": PlanEnum.PRO,
+        "depot": ("Cluj", "Cluj-Napoca", "Strada Fabricii", "10", 46.7860, 23.6200),
+        "plate_prefix": "AF",
+        "available_drivers": 1,
+        "zones": [
+            ("Cluj", "Cluj-Napoca", 46.7712, 23.6236),
+            ("Cluj", "Floresti", 46.7468, 23.4936),
+            ("Bihor", "Oradea", 47.0465, 21.9189),
+            ("Alba", "Alba Iulia", 46.0686, 23.5715),
+            ("Mures", "Targu Mures", 46.5425, 24.5575),
+            ("Sibiu", "Sibiu", 45.7983, 24.1256),
+        ],
+    },
+    {
+        "name": "Cold Chain Logistics",
+        "slug": "cold-chain-logistics",
+        "domain": "coldchainlogistics.ro",
+        "plan": PlanEnum.PRO,
+        "depot": ("Cluj", "Cluj-Napoca", "Strada Fabricii", "10", 46.7860, 23.6200),
+        "plate_prefix": "CC",
+        "available_drivers": 1,
+        "zones": [
+            ("Cluj", "Cluj-Napoca", 46.7712, 23.6236),
+            ("Cluj", "Floresti", 46.7468, 23.4936),
+            ("Bihor", "Oradea", 47.0465, 21.9189),
+            ("Alba", "Alba Iulia", 46.0686, 23.5715),
+            ("Mures", "Targu Mures", 46.5425, 24.5575),
+            ("Sibiu", "Sibiu", 45.7983, 24.1256),
+        ],
+    },
+    {
+        "name": "Moldova Distribution",
+        "slug": "moldova-distribution",
+        "domain": "moldovadistribution.ro",
+        "plan": PlanEnum.PRO,
+        "depot": ("Cluj", "Cluj-Napoca", "Strada Fabricii", "10", 46.7860, 23.6200),
+        "plate_prefix": "MD",
+        "available_drivers": 1,
+        "zones": [
+            ("Cluj", "Cluj-Napoca", 46.7712, 23.6236),
+            ("Cluj", "Floresti", 46.7468, 23.4936),
+            ("Bihor", "Oradea", 47.0465, 21.9189),
+            ("Alba", "Alba Iulia", 46.0686, 23.5715),
+            ("Mures", "Targu Mures", 46.5425, 24.5575),
+            ("Sibiu", "Sibiu", 45.7983, 24.1256),
+        ],
+    },
+]
 
 def dt(day_offset: int, hour: int, minute: int = 0) -> datetime:
     return datetime.combine(
@@ -176,14 +230,14 @@ def cleanup_database(db) -> None:
     db.commit()
 
 
-def create_user(db, email: str, full_name: str, role: RoleEnum, company_id=None) -> User:
+def create_user(db, email: str, full_name: str, role: RoleEnum, company_id=None, is_active: bool = True) -> User:
     user = User(
         email=email,
         password_hash=hash_password(PASSWORD),
         full_name=full_name,
         role=role,
         company_id=company_id,
-        is_active=True,
+        is_active=is_active,
         is_approved=True,
         must_change_password=False,
         phone=f"07{secrets.randbelow(90000000) + 10000000}",
@@ -587,7 +641,7 @@ def create_historical_kpi_data(
                 db=db,
                 company_id=company.id,
                 client_id=clients[(trip_idx + order_idx) % len(clients)].id,
-                ref_prefix="ATL-HIST",
+                ref_prefix=f"{scenario['slug'].upper().replace('-', '')}-HIST",
                 sequence=sequence,
                 local_sequence=1000 + sequence,
                 pickup_zone=pickup_zone,
@@ -647,7 +701,7 @@ def create_historical_kpi_data(
             db=db,
             company_id=company.id,
             client_id=clients[loose_idx % len(clients)].id,
-            ref_prefix="ATL-ARCHIVE",
+            ref_prefix=f"{scenario['slug'].upper().replace('-', '')}-ARCHIVE",
             sequence=sequence,
             local_sequence=2000 + loose_idx,
             pickup_zone=rng.choice(scenario["zones"]),
@@ -787,7 +841,7 @@ def create_recovery_incident_scenarios(
                 db=db,
                 company_id=company.id,
                 client_id=clients[(scenario_idx + order_idx) % len(clients)].id,
-                ref_prefix="ATL-RECOVERY",
+                ref_prefix=f"{scenario['slug'].upper().replace('-', '')}-RECOVERY",
                 sequence=sequence,
                 local_sequence=3000 + scenario_idx * 10 + order_idx,
                 pickup_zone=scenario["zones"][0],
@@ -910,6 +964,15 @@ def seed_company(db, scenario: dict, company_index: int) -> dict:
         create_user(db, f"driver{i}@{domain}", f"{scenario['name']} Driver {i}", RoleEnum.SOFER, company.id)
         for i in range(1, 11)
     ]
+    for i in range(1, scenario.get("inactive_driver_users", 0) + 1):
+        create_user(
+            db,
+            f"inactive.driver{i}@{domain}",
+            f"{scenario['name']} Inactive Driver {i}",
+            RoleEnum.SOFER,
+            company.id,
+            is_active=False,
+        )
     db.flush()
 
     vehicles = [

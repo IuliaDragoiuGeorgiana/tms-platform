@@ -218,8 +218,10 @@ class OrderFeasibilityResponse(BaseModel):
 class OrderResponse(BaseModel):
     id: uuid.UUID
     company_id: uuid.UUID
+    company_name: str | None = None
     order_ref: str
     client_id: uuid.UUID
+    client_name: str | None = None
 
     # Pickup
     address_pickup: str

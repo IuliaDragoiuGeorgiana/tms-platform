@@ -1577,8 +1577,11 @@ def get_costs(db: Session, company_id, start_date: date | None, end_date: date |
         else:
             recommendation = "Cost într-o marjă acceptabilă."
 
+        driver_name = trip.driver_name or "Nespecificat"
+
         expensive_trips.append({
             "trip_id": str(trip.id),
+            "driver_name": driver_name,
             "actual_km": round(trip_km, 2),
             "orders_count": orders_count,
             "total_cost": round(actual_cost, 2),

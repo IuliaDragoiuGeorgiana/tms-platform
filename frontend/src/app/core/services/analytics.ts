@@ -207,6 +207,7 @@ export interface CostGroupItem {
 
 export interface ExpensiveTripItem {
   trip_id: string;
+  driver_name: string;
   actual_km: number;
   orders_count: number;
   total_cost: number;

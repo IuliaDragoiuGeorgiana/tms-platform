@@ -235,7 +235,7 @@ export class Incidents implements OnInit {
       return '-';
     }
 
-    return `${Number(incident.location_lat).toFixed(5)}, ${Number(incident.location_lon).toFixed(5)}`;
+    return Number(incident.location_lat).toFixed(5) + ', ' + Number(incident.location_lon).toFixed(5);
   }
 
   private isStatusFilter(value: string): value is IncidentStatusFilter {

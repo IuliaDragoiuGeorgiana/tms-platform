@@ -64,7 +64,6 @@
         @for (employee of filteredDispatchers; track employee.id) {
         <article class="employee-row">
           <div>
-            <span class="employee-id">{{ employee.id }}</span>
             <h3>{{ employee.name }}</h3>
             <p>{{ employee.email }}</p>
           </div>
@@ -98,7 +97,6 @@
         @for (employee of filteredDrivers; track employee.id) {
         <article class="employee-row">
           <div>
-            <span class="employee-id">{{ employee.id }}</span>
             <h3>{{ employee.name }}</h3>
             <p>{{ employee.email }}</p>
           </div>

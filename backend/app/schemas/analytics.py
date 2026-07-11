@@ -216,6 +216,7 @@ class CostGroupItem(BaseModel):
 
 class ExpensiveTripItem(BaseModel):
     trip_id: str
+    driver_name: str
     actual_km: float
     orders_count: int
     total_cost: float

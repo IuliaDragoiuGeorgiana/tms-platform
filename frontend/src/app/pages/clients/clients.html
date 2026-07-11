@@ -93,7 +93,6 @@
           @for (client of group.clients; track client.id) {
           <article class="client-row">
             <div class="client-main">
-              <span class="client-id">{{ client.id }}</span>
               <h3>{{ client.full_name }}</h3>
               <p>{{ client.email }}</p>
             </div>
@@ -134,7 +133,6 @@
       @for (client of filteredClients; track client.id) {
       <article class="client-row">
         <div class="client-main">
-          <span class="client-id">{{ client.id }}</span>
           <h3>{{ client.full_name }}</h3>
           <p>{{ client.email }}</p>
         </div>

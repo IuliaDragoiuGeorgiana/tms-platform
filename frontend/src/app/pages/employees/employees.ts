@@ -210,10 +210,10 @@ export class Employees implements OnInit {
       next: (response) => {
         this.isTogglingEmployee = false;
         this.employeeToToggle = null;
-        this.updateEmployeeStatus(response);
         this.statusSuccess = response.is_active
           ? 'employees.status_activated_success'
           : 'employees.status_deactivated_success';
+        this.loadEmployees();
         this.changeDetectorRef.detectChanges();
       },
       error: (error: HttpErrorResponse) => {
@@ -271,22 +271,5 @@ export class Employees implements OnInit {
       statusKey: user.is_active ? 'employees.status.active' : 'employees.status.inactive',
       isActive: user.is_active,
     };
-  }
-
-  private updateEmployeeStatus(response: UserResponse): void {
-    const update = (employee: Employee): Employee => {
-      if (employee.id !== response.id) {
-        return employee;
-      }
-
-      return {
-        ...employee,
-        isActive: response.is_active,
-        statusKey: response.is_active ? 'employees.status.active' : 'employees.status.inactive',
-      };
-    };
-
-    this.dispatchers = this.dispatchers.map(update);
-    this.drivers = this.drivers.map(update);
   }
 }

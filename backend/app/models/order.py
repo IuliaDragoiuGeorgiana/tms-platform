@@ -132,5 +132,13 @@ class Order(UUIDPrimaryKey, FullTimestampMixin, Base):
     cascade="all, delete-orphan",
 )
 
+    @property
+    def company_name(self) -> str | None:
+        return self.company.name if self.company else None
+
+    @property
+    def client_name(self) -> str | None:
+        return self.client.full_name if self.client else None
+
     def __repr__(self) -> str:
         return f"<Order {self.order_ref} ({self.status.value})>"

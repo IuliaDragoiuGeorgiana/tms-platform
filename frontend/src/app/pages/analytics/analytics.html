@@ -405,7 +405,7 @@
         <table class="trips-table">
           <thead>
             <tr>
-              <th>{{ 'analytics.trip_id' | translate }}</th>
+              <th>{{ 'analytics.driver' | translate }}</th>
               <th>{{ 'analytics.actual_km' | translate }}</th>
               <th>{{ 'analytics.orders' | translate }}</th>
               <th>{{ 'analytics.total_cost' | translate }}</th>
@@ -415,7 +415,7 @@
           </thead>
           <tbody>
             <tr *ngFor="let trip of costs()!.top_expensive_trips">
-              <td>{{ trip.trip_id }}</td>
+              <td>{{ trip.driver_name }}</td>
               <td>{{ formatNumber(trip.actual_km, 2) }}</td>
               <td>{{ trip.orders_count }}</td>
               <td>{{ formatCurrency(trip.total_cost) }}</td>

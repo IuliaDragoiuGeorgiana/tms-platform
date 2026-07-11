@@ -747,7 +747,11 @@ export class Orders implements OnInit, OnDestroy {
 
   getOrderClientLabel(order: OrderResponse): string {
     const client = this.clients.find((existingClient) => existingClient.id === order.client_id);
-    return client?.full_name ?? order.client_id;
+    return order.client_name ?? client?.full_name ?? '';
+  }
+
+  getOrderCompanyLabel(order: OrderResponse): string {
+    return order.company_name ?? '';
   }
 
   canMarkProblematic(order: OrderResponse): boolean {

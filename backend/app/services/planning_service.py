@@ -187,23 +187,102 @@ def _driver_available_minutes(driver) -> int:
     return max(0, available)
 
 
+def _get_existing_resource_usage(
+    db: Session,
+    company_id,
+    planned_date: date,
+    exclude_planning_session_id=None,
+) -> dict:
+    """
+    Returneaza intervalele deja ocupate de curse existente pentru o zi.
+
+    Sunt luate in calcul cursele care blocheaza operational resursele:
+    PROPOSED, APPROVED si IN_PROGRESS.
+    """
+    query = db.query(Trip).filter(
+        Trip.company_id == company_id,
+        Trip.planned_date == planned_date,
+        Trip.status.in_([
+            TripStatusEnum.PROPOSED,
+            TripStatusEnum.APPROVED,
+            TripStatusEnum.IN_PROGRESS,
+        ]),
+    )
+
+    if exclude_planning_session_id:
+        query = query.filter(Trip.planning_session_id != exclude_planning_session_id)
+
+    usage = {
+        "drivers": {},
+        "vehicles": {},
+        "driver_busy_minutes": {},
+    }
+
+    for trip in query.all():
+        trip_start, trip_end = _get_trip_time_interval(trip)
+
+        if not trip_start or not trip_end:
+            continue
+
+        start_seconds = (
+            trip_start.hour * 3600
+            + trip_start.minute * 60
+            + trip_start.second
+        )
+        end_seconds = (
+            trip_end.hour * 3600
+            + trip_end.minute * 60
+            + trip_end.second
+        )
+
+        if end_seconds <= start_seconds:
+            end_seconds += 24 * 3600
+
+        busy_minutes = max(0, int((end_seconds - start_seconds) / 60))
+        interval = (start_seconds, end_seconds)
+
+        if trip.driver_id:
+            usage["drivers"].setdefault(trip.driver_id, []).append(interval)
+            usage["driver_busy_minutes"][trip.driver_id] = (
+                usage["driver_busy_minutes"].get(trip.driver_id, 0)
+                + busy_minutes
+            )
+
+        if trip.vehicle_id:
+            usage["vehicles"].setdefault(trip.vehicle_id, []).append(interval)
+
+    return usage
+
+
+def _interval_seconds_overlap(start_a: int, end_a: int, start_b: int, end_b: int) -> bool:
+    return start_a < end_b and start_b < end_a
+
+
 def _build_capacity_by_day_minutes(
     day_dates: list[date],
     drivers: list,
+    existing_usage_by_day: dict[date, dict] | None = None,
 ) -> dict[date, int]:
     """
-    Construiește capacitatea estimativă pe zi, în minute.
+    Construieste capacitatea estimativa pe zi, in minute.
 
-    Pentru moment folosim aceeași capacitate pentru fiecare zi din interval,
-    bazată pe șoferii disponibili.
+    Scade minutele deja ocupate de curse existente PROPOSED / APPROVED /
+    IN_PROGRESS, ca o planificare noua sa nu trateze aceiasi soferi ca liberi.
     """
-    total_available_minutes = sum(
-        _driver_available_minutes(driver)
-        for driver in drivers
-    )
+    existing_usage_by_day = existing_usage_by_day or {}
 
     return {
-        day: total_available_minutes
+        day: sum(
+            max(
+                0,
+                _driver_available_minutes(driver)
+                - existing_usage_by_day
+                .get(day, {})
+                .get("driver_busy_minutes", {})
+                .get(driver.id, 0),
+            )
+            for driver in drivers
+        )
         for day in day_dates
     }
 
@@ -634,6 +713,20 @@ def _choose_driver_vehicle_pair_for_trip(
             if trip_end > driver_shift_end_seconds:
                 continue
 
+            driver_busy_intervals = driver_info.get("busy_intervals", [])
+            if any(
+                _interval_seconds_overlap(route_start_seconds, trip_end, start, end)
+                for start, end in driver_busy_intervals
+            ):
+                continue
+
+            vehicle_busy_intervals = vehicle_info.get("busy_intervals", [])
+            if any(
+                _interval_seconds_overlap(route_start_seconds, trip_end, start, end)
+                for start, end in vehicle_busy_intervals
+            ):
+                continue
+
             if best_pair is None or route_start_seconds < best_available_time:
                 best_pair = (driver, vehicle, route_start_seconds)
                 best_available_time = route_start_seconds
@@ -685,14 +778,25 @@ def _plan_day(
 
     available_vehicles = vehicles.copy()
     available_drivers = drivers.copy()
+    existing_usage = _get_existing_resource_usage(
+        db=db,
+        company_id=company_id,
+        planned_date=planned_date,
+        exclude_planning_session_id=planning_session_id,
+    )
 
     driver_state = {
         driver.id: {
             "driver": driver,
-            "remaining_minutes": _driver_available_minutes(driver),
+            "remaining_minutes": max(
+                0,
+                _driver_available_minutes(driver)
+                - existing_usage["driver_busy_minutes"].get(driver.id, 0),
+            ),
             "available_from_seconds": time_to_seconds(driver.shift_start)
             if driver.shift_start
             else 5 * 3600,
+            "busy_intervals": list(existing_usage["drivers"].get(driver.id, [])),
         }
         for driver in drivers
     }
@@ -701,6 +805,7 @@ def _plan_day(
         vehicle.id: {
             "vehicle": vehicle,
             "available_from_seconds": 5 * 3600,
+            "busy_intervals": list(existing_usage["vehicles"].get(vehicle.id, [])),
         }
         for vehicle in vehicles
     }
@@ -1175,8 +1280,14 @@ def _plan_day(
 
         driver_state[chosen_driver.id]["remaining_minutes"] -= total_minutes
         driver_state[chosen_driver.id]["available_from_seconds"] = trip_end_seconds
+        driver_state[chosen_driver.id].setdefault("busy_intervals", []).append(
+            (actual_start_seconds, trip_end_seconds)
+        )
 
         vehicle_state[chosen_vehicle.id]["available_from_seconds"] = trip_end_seconds
+        vehicle_state[chosen_vehicle.id].setdefault("busy_intervals", []).append(
+            (actual_start_seconds, trip_end_seconds)
+        )
 
         driver_available_after_trip = driver_state[chosen_driver.id]["remaining_minutes"]
 
@@ -3834,9 +3945,19 @@ def run_planning(
     if not drivers:
         return {"error": "Nu există șoferi disponibili"}
     
+    existing_usage_by_day = {
+        day: _get_existing_resource_usage(
+            db=db,
+            company_id=company_id,
+            planned_date=day,
+        )
+        for day in day_dates
+    }
+
     capacity_by_day_minutes = _build_capacity_by_day_minutes(
         day_dates=day_dates,
         drivers=drivers,
+        existing_usage_by_day=existing_usage_by_day,
     )
 
     estimated_minutes_by_order = _build_estimated_minutes_by_order(

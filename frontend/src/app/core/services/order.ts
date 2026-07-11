@@ -49,8 +49,10 @@ export interface UpdateOrderServiceTimeRequest {
 export interface OrderResponse {
   id: string;
   company_id: string;
+  company_name?: string | null;
   order_ref: string;
   client_id: string;
+  client_name?: string | null;
   address_pickup: string;
   pickup_city?: string | null;
   pickup_lat?: number | null;

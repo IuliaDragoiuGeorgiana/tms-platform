@@ -63,7 +63,6 @@
       @for (incident of filteredIncidents; track incident.id) {
       <article class="incident-row" [class.incident-row--major]="incident.type === 'MAJOR'">
         <div class="incident-row__main">
-          <span class="incident-id">{{ incident.id }}</span>
           <h3>{{ incidentTypeKey(incident.type) | translate }}</h3>
           <p>{{ incident.description }}</p>
         </div>
@@ -110,10 +109,6 @@
             <dd>{{ vehicleStatusKey(incident.vehicle_status) | translate }}</dd>
           </div>
           <div>
-            <dt>{{ 'incidents.trip' | translate }}</dt>
-            <dd>{{ incident.trip_id }}</dd>
-          </div>
-          <div>
             <dt>{{ 'incidents.trip_status' | translate }}</dt>
             <dd>{{ tripStatusKey(incident.trip_status) | translate }}</dd>
           </div>
@@ -128,10 +123,6 @@
           <div>
             <dt>{{ 'incidents.resolved_at' | translate }}</dt>
             <dd>{{ formatDate(incident.resolved_at) }}</dd>
-          </div>
-          <div>
-            <dt>{{ 'incidents.recovery_trip' | translate }}</dt>
-            <dd>{{ incident.recovery_trip_id || '-' }}</dd>
           </div>
           <div>
             <dt>{{ 'incidents.extra_cost' | translate }}</dt>

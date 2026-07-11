@@ -59,7 +59,6 @@
       @for (vehicle of filteredVehicles; track vehicle.id) {
       <article class="vehicle-row">
         <div class="vehicle-main">
-          <span class="vehicle-id">{{ vehicle.id }}</span>
           <h3>{{ vehicle.plate }}</h3>
           <p>
             {{ vehicleTypeKey(vehicle.type) | translate }} ·
